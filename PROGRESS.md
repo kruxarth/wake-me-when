@@ -2,48 +2,30 @@
 
 Running log so another session can pick up. Newest state first in each section.
 
-## HANDOFF (Nov 7, ~14:30 IST) — start here
+## HANDOFF (Nov 7, ~16:00 IST) — start here
 
-Read BUILD_PROMPT.md (../BUILD_PROMPT.md) for the full brief, then this file, SPIKE.md and TESTING.md.
+**State: submittable, tagged `v0.1.0`.** 58 tests pass; `hermes plugins validate . --install-deps` passes
+(security scan: safe); `hermes plugins doctor . --ci` OK (7 tools, 1 hook). TESTING.md has runs 1–8,
+the latency budget (demo and live), find on 2 demos + 2 real recordings, and stop/disable/SIGTERM pgrep
+evidence. README screenshots (`docs/screenshots/{alert,find}.png`) are rendered from verbatim run output
+by `../spike/render_screens.py` (data in the session scratchpad; regenerate from `spike/live3.log` +
+`spike/find_real.log`).
 
-**Committed at handoff (e966ebd):** adaptive periodic-judge backoff in `wakeme/watcher.py` (`periodic_s`: x1.5 per
-clear negative up to 4 min, reset on cue hit/pending), README tweaks, `docs/src/screens.html`. Last full run under heavy load (2 live harnesses) = 55 passed, 1 failed:
-`test_demo_watch_alerts_clips_catches_up_and_cleans_up` at line 65 (auto-attach `ctx.injected` wait; passes in
-isolation — re-run when the harnesses are done, and if it still fails debug `_attach_clip` timing). Suite: `../spike/.venv/bin/python -m pytest -q tests` (56 tests, ~3 min; output of the
-last run: /tmp/claude-1000/-home-krutarth-coding-hackathon-hermes-plugin-hackathon/f5385294-cd06-40c3-93a3-ba9993604983/tasks/bks3mia8l.output).
+Fixed this session (all found on real runs):
+- Debouncer: with `confirm: twice` a moment cited by every later window never confirmed (live4,
+  9 × 0.90–0.95, no alert). Now a positive from a window with newer speech confirms. Run 8's live
+  true positive (summit1g, "he talks about a quest he is doing") fired through this path.
+- find: model answered `{"id": …}`, find dropped every hit. Prompt spells out the shape; `id` accepted.
+- `/wakeme clip` reply lost the quote when auto-attach had already cut the clip.
+- e2e test flake: `pgrep -f keynote.mp4` matched unrelated shells; now matches only `ffmpeg` processes.
 
-**Background runs still going (they write to disk; just read the logs when done — "PGREP after stop" is the last line):**
-- `../spike/live3.log` (+ `live3.log.catchup*.txt`, db `../spike/harness-data3/`): LiveNOW FOX "jobs report
-  or economy", xQc Twitch "GTA", demo://keynote real-time with the user's real model. Already got: real-model
-  demo alert ~22.9 s after the price row (plan chose confirm=twice; 3 verdicts), clip 20.0 s cut 72 s after.
-  Live streams had no matching speech so far.
-- `../spike/live4.log` (db `../spike/harness-data4/`): LiveNOW "taxes or government spending", xQc "a car or
-  driving", Sky News "weather forecast" — aiming for the first TRUE-POSITIVE live alert (DoD item still open).
-- Harness: `../spike/live_harness.py <minutes> <log> "url|condition" ...` (PATH=../spike/.venv/bin:$PATH,
-  WAKEME_DATA_DIR=<fresh dir>, SEM_SEC=60). Judge = user's model via `hermes chat -Q -q` (4–8 s/call today).
+**Only the user can do the rest** (see ../submission/NEXT_STEPS.md): Telegram E2E (TESTING.md steps;
+then fill `<TELEGRAM_RESULT>` in PR_DESCRIPTION.md), push, fill SHA/links, open the PR, record the video,
+submit the form. The question about installing into the real `~/.hermes` was never answered, so the
+plugin has not been installed there.
 
-**Remaining work, in order:**
-1. Read live3/live4 results; fill TESTING.md `<!-- RUN3 -->` and `<!-- BUDGET -->` (latency budget per source:
-   window ≤10 s + ASR ~0.5 s + judge ~4 s (+ ~8 s and one more judge when confirm=twice) + source delay).
-   Run 2 (live2.log): 9 min LiveNOW "Trump", 0 Trump mentions in 147 rows → 0 alerts (correct); its Twitch
-   watch crashed on the EPERM bug, since fixed (commit "Fix Twitch process group").
-   If no live true positive yet, run another harness with a near-certain condition (news: "they mention a US
-   state"; Twitch talkers) and record it.
-2. Screenshots: `python ../spike/render_screens.py data.json` renders docs/screenshots/{alert,find}.png from
-   docs/src/screens.html using VERBATIM real output (plan/alert/clip from live3 demo watch #3; clip frame:
-   ffmpeg -ss 5 on ../spike/harness-data3/clips/w3_a1.mp4 → docs/src/clip_frame.jpg; find output from the
-   YouTube 8dHwQq0GrAA "splashdown in the pacific" run, see TESTING/README). Label them as real dev-run output.
-3. Update README "Expected latency" with measured numbers; DEMO_SCRIPT note says alert lands ~6–20 s → use
-   measured ~20–25 s with a real model.
-4. Commit; re-run `HERMES_HOME=../.hermes-dev hermes plugins validate . --install-deps` and
-   `hermes plugins doctor . --ci`; tag the submittable state (`git tag v0.1.0`).
-5. Fill `<TELEGRAM_RESULT>` in ../submission/PR_DESCRIPTION.md only after the user tests Telegram
-   (TESTING.md "Gateway / Telegram" steps). Telegram is NOT configured; the permission question
-   (install into real ~/.hermes) is still unanswered — don't touch ~/.hermes, never push/post/submit.
-6. Final report per BUILD_PROMPT §9.
-
-**Verified already:** stop / plugin disable (on_unload) / dev-gateway SIGTERM leave no ffmpeg; `/watching`
-shows "stopped (gateway restart)" and "stopped (plugin unloaded)" correctly.
+Known limitations seen live: moments that match no cue phrase wait for the periodic judge (backs off to
+4 min); YouTube bot-checks this IP after heavy use (the plugin reports it cleanly).
 
 ## Status (Nov 7, 14:20 IST)
 

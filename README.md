@@ -10,22 +10,26 @@ nature cams: most live audio and video has no feed and no alert. Wake Me When *l
 speech recognition) and *looks* (on-screen text, optional vision model) and wakes you up only when
 your moment arrives, in the chat you asked from (Telegram, Discord, Slack, …).
 
+Real output from a development run (Nov 7 2026, judge = the maintainer's model through Hermes):
+
 ```
 👀 Watch #3 started · planning…
 Condition: they announce the price
 /watching for status · /wakeme stop 3
 
-📋 Watch #3 · Acme Phone X launch keynote (YouTube Live)
-Listening for: "price", "starts at", "dollars", "799" · On-screen: "\$\d+"
+📋 Watch #3 · Acme Phone X launch keynote (synthetic demo) (demo stream)
+Listening for: "the price is", "pricing is", "we're pricing it at", "it will cost" · On-screen: "(?i)\b(price|pricing)\b\s*[:\-]?\s*\$?\s?\d", "(?i)\$\s?\d{1,3}([,.]\d{3})*(\.\d{2})?"
 I'll ping you here.
 
 🔔 It's happening: they announce the price
-“…Acme Phone X starts at just seven hundred and ninety nine dollars.” (21:14, 1:02:13 into the watch)
-▶ Jump in: https://www.youtube.com/watch?v=…
+“Acme Phone X starts at just $799.” (14:18, 0:51 into the stream)
+▶ Jump in: demo://keynote (at 0:48)
 /wakeme clip 3 · /wakeme notit 3 · /wakeme stop 3
 ```
 
 ![A watch, its plan, the alert and the clip](docs/screenshots/alert.png)
+
+*Screenshots are the plugin's verbatim output from dev runs, shown in a chat-style frame.*
 
 ## 30-second quickstart
 
@@ -70,6 +74,8 @@ https://youtube.com/…"*.
 | `/wakeme <nature cam> when a bear catches a fish` | a vision-model check on changed keyframes |
 | `/wakeme find https://youtu.be/… where do they splash down` | ranked timestamps with deep links (`&t=…s`) in a recording |
 
+![find in a recording: one model rerank over the captions](docs/screenshots/find.png)
+
 `--every [minutes]` keeps watching after the first alert, with a cooldown (default 5 min).
 
 ## How it works
@@ -88,7 +94,7 @@ https://youtube.com/…"*.
   Stage C  LLM    vision question on changed keyframes (aux task wakeme_vision, optional)
                                               │ {matched, confidence, evidence_row_ids}
                                               ▼
-  confirm/debounce: ≥ 0.85 fires; otherwise a 2nd positive on NEW rows · never re-fires on old evidence
+  confirm/debounce: ≥ 0.85 fires; otherwise a 2nd positive after newer speech · never re-fires on old evidence
                                               ▼
   🔔 alert (time from the rows, never from the model) · evidence segments copied out of the ring
      → /wakeme clip any time later · rolling 10-min summaries → /catchup
@@ -171,11 +177,19 @@ text-only judge never breaks it.
 
 ## Expected latency
 
-Time from the moment being said to the alert ≈ source delay + up to 10 s window + speech
-recognition (~0.5 s for `base` on a laptop CPU) + one judge call. Measured numbers are in
-[TESTING.md](TESTING.md).
+Time from the moment being said to the alert ≈ source delay + up to 10 s transcript window +
+speech recognition (~0.5 s for `base` on a laptop CPU) + one judge call (4–8 s with a typical hosted
+model), plus one more judge round when the plan asks for confirmation (`confirm: twice`).
 
-| Source | Typical source delay |
+Measured on Nov 7 2026 ([TESTING.md](TESTING.md) has the breakdown):
+
+| Run | Moment → alert |
+|---|---|
+| `demo://keynote`, stub model (instant judge) | 6.5 s |
+| `demo://keynote`, real model, plan chose `confirm: twice` | ~25 s (3 judge calls of ~4 s) |
+| Twitch live (summit1g), real model, `confirm: twice` | 18 s after the transcript row, ~33 s after the words; add the source delay below |
+
+| Source | Typical source delay (stream behind real life) |
 |---|---|
 | `demo://` / local file | 0 |
 | Twitch | ~5–10 s behind live |
@@ -195,6 +209,9 @@ recognition (~0.5 s for `base` on a laptop CPU) + one judge call. Measured numbe
   in `/watching` ("Alerts you may have missed"). Telegram/Discord/Slack, the TUI and Desktop show them
   live.
 - Audio-only sources produce audio-only clips.
+- A moment that none of the plan's cue phrases or on-screen patterns catch waits for the periodic
+  judge check. That runs every `semantic_check_sec` and backs off to every 4 min on a quiet watch, so such
+  alerts can be minutes late. Phrase the condition with the words you expect to hear.
 
 ## Troubleshooting
 

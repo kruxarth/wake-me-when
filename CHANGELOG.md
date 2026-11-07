@@ -8,8 +8,8 @@ First release (Nous Research Hermes Agent Plugin Hackathon).
   local files (CLI/TUI/Desktop or `allowed_media_dirs`) and the bundled `demo://keynote` / `demo://launch`
   (`?speed=` for fast tests). Instant reply, then a watch plan; `--every [min]` for repeat alerts.
 - Cascade: free fuzzy/phonetic cue matching and keyframe OCR → LLM judge (`wakeme_judge` aux task) that
-  cites transcript rows → confirm/debounce (second positive must rest on new rows; never re-fires on old
-  evidence) → alert with quote, stream time and jump-in link.
+  cites transcript rows → confirm/debounce (a second positive must come after newer speech; never re-fires on
+  old evidence) → alert with quote, stream time and jump-in link.
 - Optional vision question on changed keyframes (`wakeme_vision` aux task).
 - Clips: evidence segments copied out of a rolling 5 s segment ring at fire time; MP4 cut on demand and
   delivered as native media from `/wakeme clip` and `wakeme_clip`.

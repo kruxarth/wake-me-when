@@ -27,8 +27,9 @@ def _wait(pred, timeout):
 
 
 def _ffmpeg_children():
-    out = subprocess.run(["pgrep", "-f", "keynote.mp4"], capture_output=True, text=True).stdout.split()
-    return [p for p in out if int(p) != os.getpid()]
+    # only real ffmpeg processes (-x: process name), so a shell whose command line mentions the file never counts
+    out = subprocess.run(["pgrep", "-a", "-x", "ffmpeg"], capture_output=True, text=True).stdout.splitlines()
+    return [line for line in out if "keynote" in line]
 
 
 @needs_ffmpeg
