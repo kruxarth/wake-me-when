@@ -42,6 +42,8 @@ def test_demo_watch_alerts_clips_catches_up_and_cleans_up(tmp_path):
 
     assert _wait(lambda: any(t.startswith("📋 Watch #1") for t in ctx.texts()), 20)
     assert _wait(lambda: any(t.startswith("🔔") for t in ctx.texts()), 60), ctx.texts()
+    # at 4x the price (0:52 of media) is reached ~13 s in; a real-time run would need 52+ s
+    assert time.time() - t0 < 35, time.time() - t0
     alert = next(t for t in ctx.texts() if t.startswith("🔔"))
     assert "starts at just seven hundred" in alert
     assert "/wakeme clip 1 · /wakeme notit 1 · /wakeme stop 1" in alert
@@ -70,6 +72,19 @@ def test_demo_watch_alerts_clips_catches_up_and_cleans_up(tmp_path):
     assert app.stop("1") == "⏹ Stopped watch #1."
     assert app.store.watch(1)["status"] in {"stopped", "ended"}
     assert _wait(lambda: not _ffmpeg_children(), 10), _ffmpeg_children()
+
+
+@needs_ffmpeg
+def test_demo_speed_really_paces_faster_than_real_time(tmp_path):
+    from wake_me_when.wakeme.ingest import AudioRing, Ingest
+    src = sources.resolve("demo://keynote?speed=4", "demo")
+    ring = AudioRing()
+    ing = Ingest(src, tmp_path, frames=False, ring=ring)
+    ing.start()
+    time.sleep(8)
+    ing.stop()
+    assert 24 <= ring.end_pos <= 40, ring.end_pos     # ~32 s of media in 8 s
+    assert ing.segments()                              # the clip ring filled too
 
 
 @needs_ffmpeg

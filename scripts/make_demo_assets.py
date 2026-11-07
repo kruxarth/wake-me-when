@@ -25,6 +25,7 @@ OUT = ROOT / "assets" / "demo"
 RATE = 24000
 GAP_S = 0.7
 
+# 10 fps, no B-frames: ffmpeg -readrate (demo ?speed=) mis-paces 5 fps video with stream copy.
 # (slide text, spoken line, moment key or "")
 KEYNOTE = [
     ("ACME LAUNCH 2026", "Good morning everyone, and welcome to the Acme launch event. It is great to have you here, and online, with us today.", ""),
@@ -124,9 +125,9 @@ def build(name: str, spec: dict, font: str, tmp: Path) -> dict:
     draws.append(f"drawtext=fontfile='{font}':text='SYNTHETIC DEMO STREAM':fontsize=16:"
                  f"fontcolor=0xffffff99:x=16:y=h-30")
     out = OUT / f"{name}.mp4"
-    run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c={spec['bg']}:s=640x360:r=5:d={total:.2f}",
+    run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c={spec['bg']}:s=640x360:r=10:d={total:.2f}",
          "-f", "s16le", "-ar", str(RATE), "-ac", "1", "-i", str(raw),
-         "-vf", ",".join(draws), "-c:v", "libx264", "-preset", "slow", "-crf", "30", "-g", "25",
+         "-vf", ",".join(draws), "-c:v", "libx264", "-preset", "slow", "-crf", "30", "-g", "50", "-bf", "0",
          "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "40k", "-shortest", "-movflags", "+faststart",
          str(out)])
 
