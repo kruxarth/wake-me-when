@@ -1,0 +1,37 @@
+name: wake-me-when
+version: "0.1.0"
+manifest_version: 2
+api_version: 1
+description: Watches live audio and video (keynotes, Twitch, launches, earnings calls) and pings you at the moment, with evidence, a clip and a catch-up.
+author: kruxarth
+license: MIT
+homepage: https://github.com/kruxarth/wake-me-when
+requires_hermes: ">=0.23.0"
+tags: [streams, alerts, video, audio, youtube, twitch, transcription]
+provides_tools:
+  - wakeme_watch
+  - wakeme_find
+  - wakeme_list
+  - wakeme_stop
+  - wakeme_catchup
+  - wakeme_clip
+  - wakeme_feedback
+provides_hooks:
+  - pre_llm_call
+config_schema:
+  whisper_model: {type: str, default: "base", choices: [tiny, base, small], description: "Local speech model: tiny, base or small"}
+  language: {type: str, default: "", description: "Speech language hint (e.g. en). Empty = auto-detect"}
+  stt_backend: {type: str, default: "local", choices: [local, captions], description: "Speech recognition backend: local (faster-whisper) or captions (demo/VOD captions only)"}
+  max_watches: {type: int, default: 3, description: "Maximum live watches at once (all Hermes processes)"}
+  max_llm_calls_per_hour: {type: int, default: 60, description: "LLM calls per watch per hour before falling back to free cue matching"}
+  semantic_check_sec: {type: int, default: 60, description: "Seconds between periodic judge checks for paraphrases"}
+  min_confidence: {type: float, default: 0.6, description: "Lowest judge confidence that can fire an alert"}
+  watch_ttl_hours: {type: float, default: 6.0, description: "Watches stop automatically after this many hours"}
+  feedback_grace_min: {type: float, default: 10.0, description: "Minutes a fired watch keeps buffering so clip / not it still work"}
+  clip_seconds: {type: int, default: 20, description: "Length of a clip"}
+  auto_clip: {type: bool, default: false, description: "Cut the clip as soon as an alert fires"}
+  catchup_summary_min: {type: float, default: 10.0, description: "Minutes of speech per rolling catch-up summary"}
+  keep_transcripts_days: {type: float, default: 7.0, description: "Days to keep transcripts and summaries"}
+  keep_clips_days: {type: float, default: 2.0, description: "Days to keep clips you asked for"}
+  allow_private_network: {type: bool, default: false, description: "Allow LAN / private addresses (e.g. a local RTSP camera)"}
+  allowed_media_dirs: {type: list, default: [], description: "Directories whose files may be watched from messaging chats"}
