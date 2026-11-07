@@ -7,7 +7,7 @@ Model for real runs: the maintainer's `deepseek-flash` through Hermes (`hermes c
 ## Unit and integration tests
 
 ```bash
-python -m pytest -q tests          # 58 passed (~1.5 min; the e2e tests run real ffmpeg on demo://)
+python -m pytest -q tests          # 59 passed (~1.5 min; the e2e tests run real ffmpeg on demo://)
 hermes plugins doctor . --ci       # OK: 7 tools, 1 hook
 hermes plugins validate . --install-deps   # Validation passed; security scan: safe
 ```
@@ -235,23 +235,54 @@ including the Twitch runs with streamlink).
 
 ## Gateway / Telegram end to end
 
-Not run yet: Telegram is not configured on the development machine and permission to install into the
-real `~/.hermes` is pending. Steps for the maintainer:
+Run on Nov 7 against the maintainer's real Hermes v0.23.0 gateway (systemd user service, Telegram in
+polling mode, model deepseek-flash). The plugin was installed the way a user installs it from Git:
+`hermes plugins install file://…/wake-me-when --ref <sha> --enable`, then
+`hermes config set plugins.entries.wake-me-when.allow_gateway_injection true`, `hermes wakeme doctor`
+(installed `stt-whisper`, Whisper `base` ready in 32 s, demo watch heard the "dollars" cue, judge call
+2.7 s) and `hermes gateway restart`. Messages were typed in the bot's DM by the maintainer.
+
+Final run (watch #4, plugin at `1c7c7f2`). Times are gateway log timestamps:
+
+| Step | Result |
+|---|---|
+| `/wakeme demo://keynote when they announce the price` (18:12:00) | 👀 reply at once; 📋 plan at 18:12:06 (plan call 5.9 s) |
+| Alert | 🔔 at 18:13:16, quote "Acme Phone X starts at just $799." at 0:53; 16.6 s after the price audio arrived, last judge call 1.5 s |
+| Auto-attach (`allow_gateway_injection`) | injected turn → agent called `wakeme_clip` → **native Telegram video** at 18:13:21 (5 s after the alert), 20.0 s long |
+| `/wakeme clip 4` | **native Telegram video** (slash-command reply with MEDIA), delivered 18:13:37 |
+| "send me the clip of that" | agent called `wakeme_clip` → **native Telegram video** 3 s after the message |
+| `/catchup 4` | timestamped bullets 0:00–0:56 including "[0:53] Price announced …" (one model call, 12 s) |
+| `/watching` | `#4 … "they announce the price" · fired · up 2:47 · 1 alert(s)` plus the recent ended watches |
+| `/wakeme stop 4` | ⏹ stopped; `pgrep -a ffmpeg` and `pgrep -a streamlink` empty afterwards |
+
+Bugs found on Telegram and fixed (each with a regression test, 59 tests pass):
+
+- **Watch crashed right after the alert** (watch #1: "❌ Watch #1 stopped: Expecting value: line 1
+  column 1"). The post-alert resnap read the evidence `index.json` while the auto-attach clip on the
+  side pool was rewriting it. Resnap now takes the watch lock (without blocking the loop), index writes
+  are atomic (`os.replace`) and an unreadable index counts as empty. Fixed in `4cb7ad0`.
+- **Auto-attached clip cut short** (watch #2: 13.8 s instead of 20 s). It was cut at fire time before the
+  seconds after the moment were recorded, and that short cut was cached; resnap also triggered on audio
+  position, not on buffered video, so it could freeze one segment early (18 s in the e2e test). The
+  auto-attach now waits up to 20 s for the window to be buffered, resnap waits for buffered video, and a
+  clip cut before its window was complete is never reused. Fixed in `de41296`.
+- **`/wakeme stop` during the post-alert grace window posted "🏁 the stream ended"** and recorded the
+  watch as ended (watch #4). It now ends as `stopped` with no extra post. Fixed in `1c7c7f2`.
+
+Seen but harmless: the agent once tried `skill_view("wake-me-when")` (plugin skills are namespaced
+`wake-me-when:wake-me-when`), got "not found", and went on to call `wakeme_clip` correctly. Telegram's
+command menu holds 60 commands and hid `/wakeme` among 52 overflow commands on this install; typing it
+works.
+
+To repeat on another install:
 
 ```bash
 hermes gateway setup                      # connect Telegram
-hermes plugins install ./wake-me-when     # or: hermes plugins install wake-me-when (after catalog merge)
+hermes plugins install wake-me-when       # after catalog merge; or a Git URL with --ref
 hermes plugins enable wake-me-when
+hermes config set plugins.entries.wake-me-when.allow_gateway_injection true   # optional auto-attach
 hermes wakeme doctor                      # installs/warms speech recognition (stt-whisper extra)
 hermes gateway restart
 ```
 
-In the Telegram chat with the bot:
-
-1. `/wakeme demo://keynote when they announce the price` → instant 👀 reply, then 📋 plan.
-2. ~55–70 s later: 🔔 alert in the same chat (note the delay after 0:52).
-3. `/wakeme clip 1` → a **native Telegram video** of the price moment (verifies MEDIA from a slash reply).
-4. Ask the agent "send me the clip again" → it calls `wakeme_clip` → video (verifies MEDIA from a tool).
-5. `/catchup 1`, `/watching`, `/wakeme stop 1`, then `pgrep -a ffmpeg` → empty.
-6. Optional: `plugins.entries.wake-me-when.allow_gateway_injection: true`, restart, repeat 1–2 → the
-   agent attaches the clip by itself after the alert.
+Then send the steps in the table above in the bot's chat.

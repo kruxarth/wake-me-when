@@ -18,6 +18,8 @@ First release (Nous Research Hermes Agent Plugin Hackathon).
   speech recognition fallback, keyword shortlist + one LLM rerank, ranked timestamps with deep links.
 - `/watching`, `/wakeme stop <id|all>`, `/wakeme notit <id>` (negative examples), `/wakeme doctor` and
   `hermes wakeme doctor`.
+- Tested end to end on a real Telegram gateway; fixed there: a post-alert crash (evidence index race), clips
+  cut short when auto-attached, and `/wakeme stop` in the grace window reporting "stream ended".
 - Seven agent tools, a bundled skill, a `pre_llm_call` hook that tells the agent which watches belong to
   the chat, and an automation blueprint ("watch a stream on a schedule").
 - Robustness: one shared faster-whisper worker (Hermes's `stt-whisper` extra) for every watch; bounded

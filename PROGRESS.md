@@ -2,7 +2,14 @@
 
 Running log so another session can pick up. Newest state first in each section.
 
-## HANDOFF (Nov 7, ~16:00 IST) — start here
+## Telegram E2E done (Nov 7, 18:20 IST)
+
+Installed into the real `~/.hermes` (user approved) from a `file://` Git URL with `--ref`; repo pushed to
+private https://github.com/kruxarth/wake-me-when. All Telegram steps pass, both native-video paths
+included (TESTING.md, "Gateway / Telegram"). Three bugs found there and fixed (4cb7ad0, de41296,
+1c7c7f2); 59 tests pass. The `v0.1.0` tag still points at 55a1df2 until the user agrees to move it.
+
+## HANDOFF (Nov 7, ~16:00 IST) — superseded by the section above
 
 **State: submittable, tagged `v0.1.0`.** 58 tests pass; `hermes plugins validate . --install-deps` passes
 (security scan: safe); `hermes plugins doctor . --ci` OK (7 tools, 1 hook). TESTING.md has runs 1–8,
