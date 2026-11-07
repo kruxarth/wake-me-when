@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from . import vtt
 
@@ -302,5 +302,5 @@ def resolve(url: str, kind: str) -> Source:
                       whitelist=RTSP_WHITELIST)
     # hls / http: direct media. A finite duration means a VOD that we play in real time.
     dur = probe_duration(url, NET_WHITELIST)
-    return Source(url=url, kind=kind, title=Path(urlparse(url).path).name or url, is_live=dur is None,
+    return Source(url=url, kind=kind, title=unquote(Path(urlparse(url).path).name) or url, is_live=dur is None,
                   inputs=[url], whitelist=NET_WHITELIST, duration=dur)

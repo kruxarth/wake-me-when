@@ -9,10 +9,10 @@ from __future__ import annotations
 import glob
 import json
 import math
-import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -74,29 +74,58 @@ def passages_from(segments: list[tuple[float, str]]) -> list[Passage]:
     return out
 
 
+def _terms(question: str, extra_terms: list[str] = ()) -> list[str]:
+    return [t for t in (cues.normalize(x) for x in planmod.heuristic_cues(question) + list(extra_terms)) if t]
+
+
+def _count(term: str, text: str) -> int:
+    n = f" {text} ".count(f" {term} ")
+    return n or (1 if cues.phrase_in(term, text) else 0)
+
+
 def keyword_rank(passages: list[Passage], question: str, extra_terms: list[str] = ()) -> list[tuple[float, Passage]]:
-    terms = [cues.normalize(t) for t in (planmod.heuristic_cues(question) + list(extra_terms)) if cues.normalize(t)]
+    """tf·idf over 30 s passages, plus a bonus when the question's key words appear together."""
+    terms = _terms(question, extra_terms)
     if not terms:
         return [(0.0, p) for p in passages]
     docs = [cues.normalize(p.text) for p in passages]
     n = len(docs)
+    tf = {t: [_count(t, d) for d in docs] for t in terms}   # one pass per term
+    idf = {t: math.log(1 + n / (sum(1 for c in counts if c) or 1)) for t, counts in tf.items()}
+    phrase = " ".join(terms)
     scored = []
-    for p, d in zip(passages, docs):
-        score = 0.0
-        for term in terms:
-            df = sum(1 for x in docs if cues.phrase_in(term, x)) or 1
-            if cues.phrase_in(term, d):
-                score += math.log(1 + n / df)
+    for i, p in enumerate(passages):
+        score = sum(idf[t] * min(tf[t][i], 3) ** 0.5 for t in terms)
+        if len(terms) > 1 and sum(1 for t in terms if tf[t][i]) == len(terms):
+            score *= 1.5
+        if len(terms) > 1 and phrase in docs[i]:
+            score *= 1.5
         scored.append((score, p))
     scored.sort(key=lambda x: -x[0])
     return scored
 
 
-def best_sentence(text: str, question: str) -> str:
-    sents = re.split(r"(?<=[.!?])\s+", text)
-    terms = planmod.heuristic_cues(question)
-    best = max(sents, key=lambda s: sum(cues.phrase_in(cues.normalize(t), cues.normalize(s)) for t in terms))
-    return best.strip()[:200]
+def best_cue(p: Passage, question: str, evidence: str = "") -> tuple[float, str]:
+    """(timestamp, evidence) from the cue inside the passage that best matches: the evidence quote
+    when the model gave one, else the question's rarest-looking (longest) terms."""
+    items = p.cues or [(p.start, p.text)]
+    ev = cues.normalize(evidence)
+    terms = sorted(_terms(question), key=len, reverse=True)
+
+    def match(text: str) -> float:
+        text = cues.normalize(text)
+        if ev:
+            sm = SequenceMatcher(None, ev[:80], text)
+            return sm.find_longest_match(0, len(ev[:80]), 0, len(text)).size / max(1, len(ev[:80]))
+        return sum(len(t) for t in terms if cues.phrase_in(t, text))
+
+    def score(i: int) -> float:  # the cue itself first; the next cue only breaks ties
+        return match(items[i][1]) + 0.1 * match(" ".join(t for _, t in items[i:i + 2]))
+
+    best = max(range(len(items)), key=score)
+    words = " ".join(t for _, t in items[best:best + 3]).split()
+    snippet = " ".join(words[:28]) + ("…" if len(words) > 28 else "")
+    return items[best][0], (evidence.strip()[:200] if evidence.strip() else snippet)
 
 
 def _youtube_captions(url: str, workdir: Path) -> tuple[dict, list[vtt.Cue]]:
@@ -195,28 +224,18 @@ def rank(passages: list[Passage], question: str,
                 p = by_id.get(int(r.get("passage_id", -1)))
                 if p is None or float(r.get("score") or 0) < 0.35:
                     continue
-                ev = str(r.get("evidence") or "").strip() or best_sentence(p.text, question)
-                hits.append(Hit(_refine_start(p, ev), float(r.get("score") or 0), ev[:200]))
+                start, ev = best_cue(p, question, str(r.get("evidence") or ""))
+                hits.append(Hit(start, float(r.get("score") or 0), ev))
             return _dedupe(hits)[:5], True
         except Exception:
             pass
     scored = [(s, p) for s, p in keyword_rank(passages, question) if s > 0][:5]
     top = scored[0][0] if scored else 1.0
     hits = []
-    for s, p in scored:
-        ev = best_sentence(p.text, question)
-        hits.append(Hit(_refine_start(p, ev), s / top, ev))
+    for score, p in scored:
+        start, ev = best_cue(p, question)
+        hits.append(Hit(start, score / top, ev))
     return _dedupe(hits), False
-
-
-def _refine_start(p: Passage, evidence: str) -> float:
-    """Point the timestamp at the cue that contains the evidence, not the passage start."""
-    ev = cues.normalize(evidence)[:60]
-    for t, text in p.cues or []:
-        nt = cues.normalize(text)
-        if ev and (ev[:30] in nt or nt[:30] in ev):
-            return t
-    return p.start
 
 
 def _dedupe(hits: list[Hit]) -> list[Hit]:

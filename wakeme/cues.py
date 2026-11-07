@@ -31,12 +31,21 @@ def soundex(word: str) -> str:
     return (out + "000")[:4]
 
 
+def stem(word: str) -> str:
+    """Crude suffix stripping: 'holding'/'held' is not solved, but 'holding'/'hold', 'prices'/'price' are."""
+    for suf in ("ing", "ed", "es", "s"):
+        if len(word) > len(suf) + 3 and word.endswith(suf):
+            return word[: -len(suf)]
+    return word
+
+
 def _token_match(a: str, b: str) -> bool:
-    if a == b:
+    if a == b or stem(a) == stem(b):
         return True
     if len(a) >= 4 and len(b) >= 4 and (SequenceMatcher(None, a, b).ratio() >= 0.8):
         return True
-    return len(a) >= 5 and len(b) >= 5 and soundex(a) == soundex(b) and a[:2] == b[:2]
+    return (len(a) >= 5 and len(b) >= 5 and soundex(a) == soundex(b) and a[:2] == b[:2]
+            and SequenceMatcher(None, a, b).ratio() >= 0.75)
 
 
 def phrase_in(phrase: str, text: str) -> bool:
