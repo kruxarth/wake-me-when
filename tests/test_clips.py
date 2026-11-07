@@ -51,3 +51,38 @@ def test_snapshot_merges_later_segments(tmp_path):
 @needs_ffmpeg
 def test_cut_without_segments_returns_none(tmp_path):
     assert clips.cut(shutil.which("ffmpeg"), [], 0, 10, tmp_path / "x.mp4") is None
+
+
+def test_snapshot_survives_unreadable_index_and_concurrent_writers(tmp_path):
+    # Telegram run: resnap read index.json while the auto-attach clip was rewriting it -> JSONDecodeError
+    # killed the watch. An empty/partial index now counts as no copies, and writes are atomic.
+    import threading
+
+    ring = tmp_path / "ring"
+    ring.mkdir()
+    segs = []
+    for i in range(6):
+        p = ring / f"s_{i:06d}.ts"
+        p.write_bytes(b"x" * 1000)
+        segs.append((str(p), i * 5.0, i * 5.0 + 5))
+    dest = tmp_path / "ev"
+    dest.mkdir()
+    (dest / "index.json").write_text("")
+    assert len(clips.snapshot(segs[:2], dest, 0, 10)) == 2
+
+    errors = []
+
+    def hammer():
+        try:
+            for _ in range(200):
+                clips.snapshot(segs, dest, 0, 30)
+        except Exception as e:  # pragma: no cover - the failure mode under test
+            errors.append(e)
+
+    threads = [threading.Thread(target=hammer) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    assert len(clips.load_snapshot(dest)) == 6

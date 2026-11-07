@@ -525,9 +525,15 @@ class Watch:
         if not self.alerts or not self.ingest:
             return
         a = self.alerts[-1]
-        if not a["resnap_done"] and self.pos > a["pos"] + 14:
+        if a["resnap_done"] or self.pos <= a["pos"] + 14:
+            return
+        if not self.lock.acquire(blocking=False):
+            return  # clip() is cutting this alert's clip; retry on the next loop
+        try:
             clips.snapshot(self.ingest.segments(), Path(a["dir"]), a["pos"] - 12, a["pos"] + 14)
             a["resnap_done"] = True
+        finally:
+            self.lock.release()
 
     def _update_behind(self) -> None:
         self._resnap()

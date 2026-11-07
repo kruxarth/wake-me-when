@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -21,10 +23,7 @@ def snapshot(segs: list[Seg], dest: Path, t_from: float, t_to: float) -> list[Se
     clip asked for minutes later still has the moment after the ring has rotated past it."""
     dest.mkdir(parents=True, exist_ok=True)
     index_path = dest / "index.json"
-    have: dict[str, Seg] = {}
-    if index_path.exists():
-        for p, a, b in json.loads(index_path.read_text()):
-            have[Path(p).name] = (p, a, b)
+    have: dict[str, Seg] = {Path(s[0]).name: s for s in load_snapshot(dest)}
     for path, a, b in overlapping(segs, t_from, t_to):
         name = Path(path).name
         if name in have:
@@ -36,7 +35,9 @@ def snapshot(segs: list[Seg], dest: Path, t_from: float, t_to: float) -> list[Se
             continue
         have[name] = (str(target), a, b)
     saved = sorted(have.values(), key=lambda s: s[1])
-    index_path.write_text(json.dumps(saved))
+    tmp = index_path.with_name(f".index.{os.getpid()}.{threading.get_ident()}.json")
+    tmp.write_text(json.dumps(saved))
+    os.replace(tmp, index_path)  # readers never see a half-written index
     return saved
 
 
