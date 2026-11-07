@@ -447,7 +447,7 @@ class Watch:
         self.judge_latencies.append(res["latency"])
         matched, conf, quote = parse_verdict(res["parsed"])
         ids = map_evidence(res["parsed"], rows) if matched else []
-        d = self.deb.judge(matched, conf, ids, quote)
+        d = self.deb.judge(matched, conf, ids, quote, newest_row=rows[-1][0] if rows else 0)
         self.store.event(self.id, "verdict", self.pos, matched=matched, confidence=conf, rows=ids,
                          action=d.action, latency=round(res["latency"], 2))
         if d.action == "fire":
@@ -649,8 +649,9 @@ class Watch:
             out_dir = data_dir() / "clips"
             if self.alerts:
                 a = self.alerts[-1]
+                msg = f"🎬 Clip for watch #{self.id}: “{a['quote'][:90]}” ({sources.fmt_pos(a['pos'])})"
                 if a.get("clip") and Path(a["clip"]).exists():
-                    return Path(a["clip"]), f"🎬 Clip for watch #{self.id} (alert {a['n']})"
+                    return Path(a["clip"]), msg
                 if self.ingest and not a["resnap_done"]:
                     clips.snapshot(self.ingest.segments(), Path(a["dir"]), a["pos"] - 12, a["pos"] + 14)
                 segs = clips.load_snapshot(Path(a["dir"]))
@@ -658,8 +659,7 @@ class Watch:
                 out = clips.cut(ffmpeg, segs, start, self.s.clip_seconds, out_dir / f"w{self.id}_a{a['n']}.mp4")
                 if out:
                     a["clip"] = str(out)
-                    return out, (f"🎬 Clip for watch #{self.id}: “{a['quote'][:90]}” "
-                                 f"({sources.fmt_pos(a['pos'])})")
+                    return out, msg
                 return None, "The saved evidence for that alert is gone (the watch has ended)."
             if not self.ingest:
                 return None, f"Watch #{self.id} has no video buffered yet."

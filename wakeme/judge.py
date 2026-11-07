@@ -93,8 +93,9 @@ class Debouncer:
 
     * fire when confidence >= min_conf and (confidence >= 0.85 and confirm == "once", or two
       positives in a row);
-    * the second positive must cite at least one row the first did not (overlapping windows that
-      repeat the same quote never count twice);
+    * the second positive must cite a row the first did not, or come from a window that reaches
+      newer rows than the first one did (the judge looked again with more context and still agrees);
+      re-judging the same window never counts twice;
     * evidence at or before the last fire is never used again (``--every`` cannot re-fire on it);
     * rows the user rejected ("not it") are suppressed.
     """
@@ -105,19 +106,23 @@ class Debouncer:
         self.min_conf = min_conf
         self.confirm = confirm
         self.pending: Optional[set[int]] = None
+        self.pending_newest = 0  # newest row id in the window that produced the pending positive
         self.last_fire_row = 0
         self.suppressed: set[int] = set()
 
-    def judge(self, matched: bool, confidence: float, row_ids: list[int], quote: str = "") -> Decision:
+    def judge(self, matched: bool, confidence: float, row_ids: list[int], quote: str = "",
+              newest_row: int = 0) -> Decision:
+        """``newest_row``: the newest row id in the judged window (0 when unknown)."""
         ids = {r for r in row_ids if r > self.last_fire_row and r not in self.suppressed}
         if not matched or confidence < self.min_conf or not ids:
-            self.pending = None
+            self.pending, self.pending_newest = None, 0
             return Decision("none")
         if confidence >= self.HIGH and self.confirm != "twice":
             return self._fire(ids, confidence, quote)
-        if self.pending is not None and ids - self.pending:
+        if self.pending is not None and (ids - self.pending or newest_row > self.pending_newest):
             return self._fire(ids | self.pending, confidence, quote)
         self.pending = ids if self.pending is None else self.pending | ids
+        self.pending_newest = max(self.pending_newest, newest_row)
         return Decision("pending", sorted(ids), confidence, quote)
 
     def stage_a_only(self, strong: bool, row_ids: list[int], quote: str = "") -> Decision:
@@ -131,13 +136,14 @@ class Debouncer:
 
     def _fire(self, ids: set[int], confidence: float, quote: str) -> Decision:
         self.pending = None
+        self.pending_newest = 0
         self.last_fire_row = max(ids)
         return Decision("fire", sorted(ids), confidence, quote)
 
     def reject(self, row_ids: list[int]) -> None:
         """User said "not it": these rows never count again; the watch resumes from here."""
         self.suppressed.update(row_ids)
-        self.pending = None
+        self.pending, self.pending_newest = None, 0
 
 
 def parse_verdict(parsed: Any) -> tuple[bool, float, str]:

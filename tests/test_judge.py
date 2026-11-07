@@ -24,6 +24,17 @@ def test_overlapping_windows_never_count_as_two_positives():
     assert dec.action == "fire" and dec.row_ids == [10, 11]
 
 
+def test_same_rows_confirmed_by_a_window_that_saw_newer_speech():
+    # live run (LiveNOW FOX, "taxes or government spending", confirm=twice): the judge cited rows
+    # 274-276 nine times at 0.90-0.95 while the window moved on; that must confirm, not stay pending
+    d = Debouncer(min_conf=0.6, confirm="twice")
+    assert d.judge(True, 0.95, [274, 275, 276], newest_row=278).action == "pending"
+    # the same window judged again (cue re-trigger, no new speech) is not a confirmation
+    assert d.judge(True, 0.93, [274, 275, 276], newest_row=278).action == "pending"
+    dec = d.judge(True, 0.93, [274, 275, 276], newest_row=284)
+    assert dec.action == "fire" and dec.row_ids == [274, 275, 276]
+
+
 def test_negative_between_positives_resets_confirmation():
     d = Debouncer(min_conf=0.6)
     d.judge(True, 0.7, [10])
