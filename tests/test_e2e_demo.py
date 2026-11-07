@@ -77,8 +77,11 @@ def test_demo_watch_alerts_clips_catches_up_and_cleans_up(tmp_path):
     hint = app.context_for(session_id="s1")
     assert "#1" in hint and "they announce the price" in hint
 
+    assert _wait(lambda: w.ingest and w.ingest.proc and w.ingest.proc.poll() is not None, 30)  # media over:
+    time.sleep(2)                                       # the watch now waits in its post-alert grace window
     assert app.stop("1") == "⏹ Stopped watch #1."
-    assert app.store.watch(1)["status"] in {"stopped", "ended"}
+    assert _wait(lambda: app.store.watch(1)["status"] == "stopped", 10), app.store.watch(1)["status"]
+    assert not any(t.startswith("🏁") for t in ctx.texts())   # a user stop is not "the stream ended"
     assert _wait(lambda: not _ffmpeg_children(), 10), _ffmpeg_children()
 
 

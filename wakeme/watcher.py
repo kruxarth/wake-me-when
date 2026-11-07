@@ -311,6 +311,8 @@ class Watch:
             self._collect_judge()
             if self.status == "fired":
                 self._wait_grace()
+            if self.stop_event.is_set():  # /wakeme stop during the drain or grace window
+                return "stopped", self.stop_reason or "stopped", None
             return "ended", "stream ended", (f"🏁 Watch #{self.id}: the stream ended"
                                              + ("." if self.alerts else " without the moment."))
         tail = self.ingest.stderr_tail if self.ingest else ""
