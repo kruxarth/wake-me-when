@@ -6,9 +6,10 @@ Running log so another session can pick up. Newest state first in each section.
 
 Read BUILD_PROMPT.md (../BUILD_PROMPT.md) for the full brief, then this file, SPIKE.md and TESTING.md.
 
-**Uncommitted at handoff:** adaptive periodic-judge backoff in `wakeme/watcher.py` (`periodic_s`: x1.5 per
-clear negative up to 4 min, reset on cue hit/pending), README tweaks, `docs/src/screens.html`. Run the
-suite before committing: `../spike/.venv/bin/python -m pytest -q tests` (56 tests, ~3 min; output of the
+**Committed at handoff (e966ebd):** adaptive periodic-judge backoff in `wakeme/watcher.py` (`periodic_s`: x1.5 per
+clear negative up to 4 min, reset on cue hit/pending), README tweaks, `docs/src/screens.html`. Last full run under heavy load (2 live harnesses) = 55 passed, 1 failed:
+`test_demo_watch_alerts_clips_catches_up_and_cleans_up` at line 65 (auto-attach `ctx.injected` wait; passes in
+isolation — re-run when the harnesses are done, and if it still fails debug `_attach_clip` timing). Suite: `../spike/.venv/bin/python -m pytest -q tests` (56 tests, ~3 min; output of the
 last run: /tmp/claude-1000/-home-krutarth-coding-hackathon-hermes-plugin-hackathon/f5385294-cd06-40c3-93a3-ba9993604983/tasks/bks3mia8l.output).
 
 **Background runs still going (they write to disk; just read the logs when done — "PGREP after stop" is the last line):**
