@@ -511,6 +511,13 @@ class Watch:
         key = self.session.get("session_key")
         if injector is None or not key:
             return
+        # The seconds after the moment are still being recorded at fire time; give them a moment so the
+        # clip isn't cut off right after the line that triggered it.
+        a = self.alerts[-1]
+        deadline = time.time() + 20
+        while not self._buffered_past(a["pos"] + 14) and time.time() < deadline:
+            if self.stop_event.wait(0.5):
+                break
         self.clip()  # cut it now so the tool call returns at once
         try:
             ok = injector(f"[Wake Me When] Watch #{self.id} just alerted. Call the wakeme_clip tool with "
@@ -520,12 +527,19 @@ class Watch:
             ok = False
         self.store.event(self.id, "auto_attach", self.pos, injected=bool(ok))
 
+    def _buffered_past(self, t: float) -> bool:
+        """True once the ring holds video up to stream position ``t`` (or nothing more is coming)."""
+        if not self.ingest:
+            return True
+        segs = self.ingest.segments()
+        return bool(segs) and segs[-1][2] >= t
+
     def _resnap(self) -> None:
         """Catch the segments after the moment once they exist (they're still being written at fire time)."""
         if not self.alerts or not self.ingest:
             return
         a = self.alerts[-1]
-        if a["resnap_done"] or self.pos <= a["pos"] + 14:
+        if a["resnap_done"] or not self._buffered_past(a["pos"] + 14):
             return
         if not self.lock.acquire(blocking=False):
             return  # clip() is cutting this alert's clip; retry on the next loop
@@ -658,13 +672,17 @@ class Watch:
                 msg = f"🎬 Clip for watch #{self.id}: “{a['quote'][:90]}” ({sources.fmt_pos(a['pos'])})"
                 if a.get("clip") and Path(a["clip"]).exists():
                     return Path(a["clip"]), msg
+                start = a["pos"] - min(6.0, self.s.clip_seconds / 3)
+                # Only keep a clip that covers the whole window; one cut before the rest was recorded
+                # is sent as is but cut again next time.
+                complete = a["resnap_done"] or self._buffered_past(start + self.s.clip_seconds)
                 if self.ingest and not a["resnap_done"]:
                     clips.snapshot(self.ingest.segments(), Path(a["dir"]), a["pos"] - 12, a["pos"] + 14)
                 segs = clips.load_snapshot(Path(a["dir"]))
-                start = a["pos"] - min(6.0, self.s.clip_seconds / 3)
                 out = clips.cut(ffmpeg, segs, start, self.s.clip_seconds, out_dir / f"w{self.id}_a{a['n']}.mp4")
                 if out:
-                    a["clip"] = str(out)
+                    if complete:
+                        a["clip"] = str(out)
                     return out, msg
                 return None, "The saved evidence for that alert is gone (the watch has ended)."
             if not self.ingest:

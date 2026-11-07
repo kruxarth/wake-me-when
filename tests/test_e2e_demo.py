@@ -64,6 +64,9 @@ def test_demo_watch_alerts_clips_catches_up_and_cleans_up(tmp_path):
 
     path, msg = app.clip("1")
     assert path is not None and path.exists() and "ninety nine" in msg
+    dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                str(path)], capture_output=True, text=True).stdout)
+    assert dur >= w.s.clip_seconds - 1, dur             # the whole window, not cut off after the moment
 
     summary = app.catchup("1")
     assert summary.startswith("📺 Catch-up · watch #1")
