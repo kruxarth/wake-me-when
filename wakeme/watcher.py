@@ -127,6 +127,7 @@ class Watch:
         self.judge_latencies: list[float] = []
         self.trigger_judge = False
         self.last_text, self.last_end = "", -1e9
+        self.periodic_s = float(self.s.semantic_check_sec)
         self.ocr_at = 0.0
 
     # ---- helpers ------------------------------------------------------------------------------
@@ -377,6 +378,7 @@ class Watch:
         res = cues.match(new, self.plan.cue_phrases, self.plan.negative_cues)
         self.stage_a_last = res if res.hit else self.stage_a_last
         if res.hit:
+            self.periodic_s = float(self.s.semantic_check_sec)
             self._maybe_judge(trigger=True)
 
     def _judge_rows(self) -> list[tuple[int, str]]:
@@ -395,7 +397,7 @@ class Watch:
         if not rows or rows[-1][0] <= self.last_judged_row and not trigger:
             return False
         new_speech = rows[-1][0] > self.last_judged_row
-        due = (time.time() - self.last_judge >= self.s.semantic_check_sec) and new_speech
+        due = (time.time() - self.last_judge >= self.periodic_s) and new_speech
         follow_up = self.pending_since_row is not None and new_speech
         if not (trigger or due or follow_up or (force_tail and new_speech)):
             return False
@@ -453,8 +455,11 @@ class Watch:
             self._fire(d, rows)
         elif d.action == "pending":
             self.pending_since_row = max(ids)
+            self.periodic_s = float(self.s.semantic_check_sec)
         else:
             self.pending_since_row = None
+            if not stage_a.hit:  # quiet stream: back off the periodic paraphrase check (cue hits stay instant)
+                self.periodic_s = min(self.periodic_s * 1.5, max(240.0, self.s.semantic_check_sec))
 
     # ---- alerts ------------------------------------------------------------------------------
 

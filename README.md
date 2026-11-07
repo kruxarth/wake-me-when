@@ -25,8 +25,7 @@ I'll ping you here.
 /wakeme clip 3 · /wakeme notit 3 · /wakeme stop 3
 ```
 
-<!-- screenshots: replaced with pinned raw.githubusercontent.com URLs after the repo is pushed -->
-![Alert on Telegram](docs/screenshots/telegram-alert.png)
+![A watch, its plan, the alert and the clip](docs/screenshots/alert.png)
 
 ## 30-second quickstart
 
@@ -41,7 +40,8 @@ uv tool install yt-dlp && uv tool install streamlink
 **Install and check:**
 
 ```bash
-hermes plugins install wake-me-when
+hermes plugins install wake-me-when          # from the catalog (or: hermes plugins install kruxarth/wake-me-when)
+hermes plugins enable wake-me-when
 hermes wakeme doctor
 ```
 
@@ -68,7 +68,7 @@ https://youtube.com/…"*.
 | `/wakeme <council meeting stream> when agenda item 7 on the bike lane comes up` | "item seven", "bike lane", the agenda slide |
 | `/wakeme <launch coverage> when it's T-minus 1 minute, or if it's scrubbed` | "T minus one minute", "scrub", "hold", "T-01:00" on screen |
 | `/wakeme <nature cam> when a bear catches a fish` | a vision-model check on changed keyframes |
-| `/wakeme find https://youtu.be/… where do they talk about the heat shield` | ranked timestamps with deep links (`&t=…s`) in a recording |
+| `/wakeme find https://youtu.be/… where do they splash down` | ranked timestamps with deep links (`&t=…s`) in a recording |
 
 `--every [minutes]` keeps watching after the first alert, with a cooldown (default 5 min).
 
@@ -101,7 +101,9 @@ https://youtube.com/…"*.
   time and falls back to fuzzy-matching the quote.
 - **"Not it" teaches it.** `/wakeme notit 3` resumes the watch and shows the judge that moment as
   a negative example.
-- **Budgets.** At most `max_llm_calls_per_hour` model calls per watch (default 60). When the
+- **Budgets.** The periodic paraphrase check backs off from 60 s to 4 min while the stream stays
+  clearly off-topic and snaps back on any cue hit. At most `max_llm_calls_per_hour` model calls per
+  watch (default 60). When the
   budget runs out, or the provider is down, it keeps watching with Stage A only and fires on strong
   cue matches, clearly marked *unconfirmed* — it never misses silently.
 - **Clips survive the ring.** At alert time the segments around the evidence are copied out of the
@@ -149,6 +151,7 @@ Desktop Plugins tab.
 | `feedback_grace_min` | `10` | how long a fired watch keeps its buffer for clip / not it |
 | `clip_seconds` | `20` | clip length |
 | `auto_clip` | `false` | cut the clip at alert time |
+| `auto_attach_clip` | `true` | when `allow_gateway_injection` is granted, ask the agent to attach the clip right after an alert (one agent turn) |
 | `catchup_summary_min` | `10` | minutes per rolling summary |
 | `keep_transcripts_days` | `7` | transcripts and summaries |
 | `keep_clips_days` | `2` | clips you asked for |
@@ -225,7 +228,9 @@ recognition (~0.5 s for `base` on a laptop CPU) + one judge call. Measured numbe
   per watch (deleted when the watch ends, after the grace window), clips you ask for (kept
   `keep_clips_days`), transcripts and summaries (kept `keep_transcripts_days`).
 - **Optional permission:** `plugins.entries.wake-me-when.allow_gateway_injection: true` lets the
-  plugin hand an undeliverable alert to the agent as a message in your chat. Off by default.
+  plugin (a) ask the agent in your chat to attach the clip right after an alert (`auto_attach_clip`),
+  which runs one agent turn on your main model, and (b) hand an alert it couldn't post to the agent.
+  Off by default; without it, `/wakeme clip <id>` is the way to get the clip.
 - **No telemetry.** Nothing is reported anywhere.
 - **Speech recognition install:** on first use (or `doctor`) it asks Hermes to install its own
   `stt-whisper` extra (`faster-whisper`) through Hermes's package manager.
