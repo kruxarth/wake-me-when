@@ -12,13 +12,16 @@ PLAN_SCHEMA = {
         "summary": {"type": "string"},
         "cue_phrases": {"type": "array", "items": {"type": "string"}},
         "ocr_patterns": {"type": "array", "items": {"type": "string"}},
+        "screen_label": {"type": "string"},
         "visual_question": {"type": ["string", "null"]},
         "negative_cues": {"type": "array", "items": {"type": "string"}},
         "confirm": {"type": "string", "enum": ["once", "twice"]},
         "min_confidence": {"type": "number"},
+        "mode": {"type": "string", "enum": ["once", "every"]},
+        "cooldown_min": {"type": ["number", "null"]},
     },
-    "required": ["summary", "cue_phrases", "ocr_patterns", "visual_question", "negative_cues", "confirm",
-                 "min_confidence"],
+    "required": ["summary", "cue_phrases", "ocr_patterns", "screen_label", "visual_question", "negative_cues",
+                 "confirm", "min_confidence", "mode", "cooldown_min"],
 }
 
 PLAN_INSTRUCTIONS = """WAKEME_PLAN
@@ -29,11 +32,14 @@ Turn a user's "wake me when ..." condition for a live audio/video stream into a 
   misspellings of names.
 - ocr_patterns: 0-4 Python regexes for ON-SCREEN text that would show it (scoreboard, lower third,
   price slide); [] if nothing would be written on screen.
+- screen_label: 1-4 plain words naming what ocr_patterns look for ("prices", "the score"); "" if none.
 - visual_question: a yes/no question about a video frame ONLY if the moment is purely visual (an
   animal appears, a rocket lifts off on camera); otherwise null.
 - negative_cues: phrases that sound related but mean it has NOT happened ("in a moment", "later").
 - confirm: "twice" when a single mention is easily ambiguous, else "once".
 - min_confidence: 0.5-0.8.
+- mode: "every" when the user wants each occurrence ("every time", "each time", "whenever"), else "once".
+- cooldown_min: minutes between repeat alerts if the user gave one ("every 10 minutes"), else null.
 Reply with JSON only."""
 
 
@@ -42,10 +48,13 @@ class Plan:
     summary: str
     cue_phrases: list[str] = field(default_factory=list)
     ocr_patterns: list[str] = field(default_factory=list)
+    screen_label: str = ""
     visual_question: Optional[str] = None
     negative_cues: list[str] = field(default_factory=list)
     confirm: str = "once"
     min_confidence: float = 0.6
+    mode: Optional[str] = None             # once | every, when the model read it from the condition
+    cooldown_min: Optional[float] = None
 
     @property
     def needs_frames(self) -> bool:
@@ -80,14 +89,22 @@ class Plan:
             mc = float(d.get("min_confidence", 0.6))
         except (TypeError, ValueError):
             mc = 0.6
+        try:
+            cd = float(d["cooldown_min"]) if d.get("cooldown_min") not in (None, "") else None
+        except (TypeError, ValueError):
+            cd = None
+        mode = str(d.get("mode") or "").lower()
         return cls(
             summary=str(d.get("summary") or condition).strip()[:120] or condition,
             cue_phrases=[c.lower() for c in strs("cue_phrases", 16)],
             ocr_patterns=ocr,
+            screen_label=str(d.get("screen_label") or "").strip()[:40] if ocr else "",
             visual_question=vq,
             negative_cues=[c.lower() for c in strs("negative_cues", 8)],
             confirm="twice" if str(d.get("confirm")).lower() == "twice" else "once",
             min_confidence=min(max(mc, 0.4), 0.9),
+            mode=mode if mode in {"once", "every"} else None,
+            cooldown_min=max(1.0, cd) if cd else None,
         )
 
 
@@ -111,16 +128,52 @@ class WatchRequest:
     condition: str
     mode: str = "once"  # once | every
     cooldown_min: float = 5.0
+    mode_set: bool = False  # the user's words fixed the mode/cooldown, so the plan model doesn't override it
+    phrasing: str = "unclear"  # watch | search | unclear: how the text after the link reads
+
+
+_REPEAT = re.compile(r"^(?:every\s+time|each\s+time|any\s*time|whenever)\b\s*", re.I)
+_COOLDOWN = re.compile(r"[\s,(]*\b(?:(?:at\s+most|no\s+more\s+than)\s+)?(?:once\s+)?every\s+(\d+(?:\.\d+)?)\s*"
+                       r"(?:min(?:ute)?s?|m)\b[\s,)]*", re.I)
+_WATCH_LEAD = re.compile(r"^(?:when|if|once|as\s+soon\s+as)\b\s*", re.I)
+_QUESTION = re.compile(r"^(?:where|what|which|who|why|how|find|show\s+me|is\s+there|are\s+there|did|does|do|"
+                       r"when\s+(?:do|does|did|is|was|were|are)\b)\b", re.I)
+
+
+def repeat_words(cond: str) -> tuple[str, Optional[str], Optional[float]]:
+    """Plain-word repeat mode, for when the plan model is not asked: "every time …" / "whenever …" means
+    every occurrence, "… every 10 minutes" sets the cooldown. Returns (condition without those words,
+    mode or None, cooldown or None)."""
+    mode, cooldown = None, None
+    m = _COOLDOWN.search(cond)
+    if m:
+        mode, cooldown = "every", float(m.group(1))
+        cond = (cond[:m.start()] + " " + cond[m.end():]).strip()
+    m = _REPEAT.match(cond)
+    if m:
+        mode = "every"
+        cond = cond[m.end():]
+    return cond.strip(" ,."), mode, cooldown
+
+
+def phrasing(cond: str) -> str:
+    """``watch`` for "when …" / "every time …", ``search`` for a question, else ``unclear``."""
+    if _QUESTION.match(cond) or cond.rstrip().endswith("?"):
+        return "search"
+    if _WATCH_LEAD.match(cond) or _REPEAT.match(cond):
+        return "watch"
+    return "unclear"
 
 
 def parse_watch(raw: str) -> WatchRequest:
-    """Parse ``<url> when <condition>`` (or ``when <condition> <url>`` / ``<condition> <url>``) with an
-    optional ``--every [minutes]`` flag. Raises ValueError with a usage hint."""
+    """Parse ``<url> when <condition>`` (or ``when <condition> <url>`` / ``<condition> <url>``). "every time …"
+    in the condition (or the older ``--every [minutes]`` flag) alerts on each occurrence. Raises ValueError
+    with a usage hint."""
     text = raw.strip()
-    mode, cooldown = "once", 5.0
+    mode, cooldown, mode_set = "once", 5.0, False
     m = re.search(r"\s--every(?:[ =](\d+(?:\.\d+)?))?\b", " " + text)
     if m:
-        mode = "every"
+        mode, mode_set = "every", True
         if m.group(1):
             cooldown = float(m.group(1))
         text = (" " + text).replace(m.group(0), " ").strip()
@@ -130,10 +183,16 @@ def parse_watch(raw: str) -> WatchRequest:
         raise ValueError("I need a stream link. Usage: /wakeme <url> when <condition>")
     url = tokens.pop(url_idx)
     cond = " ".join(tokens).strip()
-    cond = re.sub(r"^(?:when|if|once|as soon as)\b\s*", "", cond, flags=re.I).strip(" ,.")
+    how = phrasing(cond)
+    cond = _WATCH_LEAD.sub("", cond).strip(" ,.")
+    cond, said_mode, said_cooldown = repeat_words(cond)
+    if said_mode and not mode_set:
+        mode, mode_set = said_mode, True
+        cooldown = said_cooldown or cooldown
     if len(cond) < 3:
         raise ValueError("What should I wait for? Usage: /wakeme <url> when <condition>")
-    return WatchRequest(url=url.strip("<>"), condition=cond[:300], mode=mode, cooldown_min=max(1.0, cooldown))
+    return WatchRequest(url=url.strip("<>"), condition=cond[:300], mode=mode, cooldown_min=max(1.0, cooldown),
+                        mode_set=mode_set, phrasing=how)
 
 
 def heuristic_cues(condition: str) -> list[str]:
@@ -146,10 +205,12 @@ def heuristic_cues(condition: str) -> list[str]:
 
 
 def describe(plan: Plan) -> str:
-    listen = ", ".join(f'"{c}"' for c in plan.cue_phrases[:4]) or "(semantic check only)"
+    """The plan card line. Plain words only: cue phrases, a label for the screen patterns, never a regex."""
+    listen = ", ".join(f"“{c}”" for c in plan.cue_phrases[:4])
+    listen = (listen + ("…" if len(plan.cue_phrases) > 4 else "")) or "anything that means it (no fixed words)"
     parts = [f"Listening for: {listen}"]
     if plan.ocr_patterns:
-        parts.append("On-screen: " + ", ".join(f'"{p}"' for p in plan.ocr_patterns[:2]))
+        parts.append(f"Watching the screen for: {plan.screen_label or 'related text'}")
     if plan.visual_question:
         parts.append(f"Looking for: {plan.visual_question}")
     return " · ".join(parts)

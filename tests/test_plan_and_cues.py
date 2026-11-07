@@ -66,3 +66,47 @@ def test_strong_needs_two_cues_or_ocr():
 def test_soundex_groups_asr_spellings():
     assert cues.soundex("Kubernetes") == cues.soundex("Kubernetis")
     assert cues.soundex("price") != cues.soundex("prize") or cues.phrase_in("price", "prize")  # fuzzy is fine
+
+
+@pytest.mark.parametrize("raw,cond,mode,cooldown", [
+    ("demo://keynote every time they mention the camera", "they mention the camera", "every", 5),
+    ("demo://keynote each time they say price", "they say price", "every", 5),
+    ("demo://keynote whenever the crowd cheers", "the crowd cheers", "every", 5),
+    ("demo://keynote when they mention the camera, at most every 10 minutes", "they mention the camera", "every", 10),
+    ("demo://keynote when they say liftoff --every 3", "they say liftoff", "every", 3),  # old flag still works
+    ("demo://keynote when they announce the price", "they announce the price", "once", 5),
+])
+def test_plain_word_repeat_mode(raw, cond, mode, cooldown):
+    req = plan.parse_watch(raw)
+    assert (req.condition, req.mode, req.cooldown_min) == (cond, mode, cooldown)
+    assert req.mode_set == (mode == "every")
+
+
+@pytest.mark.parametrize("raw,how", [
+    ("demo://keynote when they announce the price", "watch"),
+    ("demo://keynote every time they mention the camera", "watch"),
+    ("demo://keynote where do they talk about the battery", "search"),
+    ("demo://keynote what time do they announce the price?", "search"),
+    ("demo://keynote when do they announce the price", "search"),
+    ("demo://keynote find the price announcement", "search"),
+    ("demo://keynote the price", "unclear"),
+])
+def test_phrasing(raw, how):
+    assert plan.parse_watch(raw).phrasing == how
+
+
+def test_plan_model_mode_and_cooldown_are_read():
+    p = plan.Plan.from_dict({"summary": "s", "cue_phrases": ["camera"], "mode": "every", "cooldown_min": 0.2})
+    assert p.mode == "every" and p.cooldown_min == 1.0
+    assert plan.Plan.from_dict({"summary": "s", "cue_phrases": ["x"], "mode": "sometimes"}).mode is None
+    assert {"mode", "cooldown_min", "screen_label"} <= set(plan.PLAN_SCHEMA["required"])
+
+
+def test_plan_card_has_no_regex():
+    p = plan.Plan.from_dict({"summary": "s", "cue_phrases": ["the price is", "starts at", "dollars", "799", "usd"],
+                             "ocr_patterns": [r"\$\s?\d{1,3}(?:[.,]\d{2})?", r"(?i)price"], "screen_label": "prices"})
+    card = plan.describe(p)
+    assert card == "Listening for: “the price is”, “starts at”, “dollars”, “799”… · Watching the screen for: prices"
+    assert "\\" not in card and "$" not in card and "(?" not in card
+    unlabeled = plan.Plan.from_dict({"summary": "s", "cue_phrases": ["x"], "ocr_patterns": [r"\d+"]})
+    assert plan.describe(unlabeled).endswith("Watching the screen for: related text")

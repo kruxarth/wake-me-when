@@ -215,6 +215,11 @@ class Watch:
         if self.plan is None:
             return "ended", f"plan: {err}", f"❌ Watch #{self.id} couldn't plan the watch: {err}"
         self.store.update_watch(self.id, plan=self.plan.to_dict())
+        if not self.req.mode_set and self.plan.mode:  # the model read "each time …" the regex didn't catch
+            self.req.mode = self.plan.mode
+            if self.plan.cooldown_min:
+                self.req.cooldown_min = self.plan.cooldown_min
+            self.store.update_watch(self.id, mode=self.req.mode)
         self.deb = Debouncer(min_conf=max(self.s.min_confidence, self.plan.min_confidence), confirm=self.plan.confirm)
         asr.WORKER.language = self.s.language or None
 
@@ -232,10 +237,12 @@ class Watch:
             extra.append("Installing/loading speech recognition first (about 1–3 minutes the first time).")
             self.mgr.warm_asr()
         if self.session.get("platform") in notify.LOCAL_PLATFORMS:
-            extra.append("This watch runs in your Hermes gateway; alerts also show in /watching.")
+            extra.append("This watch runs in your Hermes gateway; alerts also show in /wakeme list.")
         frames = self.plan.needs_frames and bool(sources.which("tesseract") or self.plan.visual_question)
         if self.plan.ocr_patterns and not sources.which("tesseract"):
             extra.append("On-screen text needs tesseract (not installed), so I'm listening only.")
+        if self.req.mode == "every":
+            extra.append(f"Alerting every time, at most once every {self.req.cooldown_min:g} min.")
         by = f" · {self.src.channel}" if self.src.channel and self.src.channel != "Wake Me When" else ""
         self.say(f"📋 Watch #{self.id} · {self.src.title}{by} ({self.src.label})\n{planmod.describe(self.plan)}\n"
                  + ("\n".join(extra) + "\n" if extra else "") + "I'll ping you here.")
@@ -492,7 +499,7 @@ class Watch:
         link = self.src.link(t_pos if not self.src.is_live or self.src.kind == "demo" else None)
         text = (f"{head}\n“{quote}” ({when}, {sources.fmt_pos(t_pos)} into the "
                 f"{'stream' if self.src.kind in {'demo', 'file'} or not self.src.is_live else 'watch'})\n"
-                f"▶ Jump in: {link}\n/wakeme clip {self.id} · /wakeme notit {self.id} · /wakeme stop {self.id}")
+                f"▶ Jump in: {link}\nReply “clip”, “not it” or “stop”.")
         if self.req.mode == "once":
             self.fired_at = now
             self.set_status("fired")
