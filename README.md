@@ -13,18 +13,18 @@ your moment arrives, in the chat you asked from (Telegram, Discord, Slack, …).
 Real output from a development run (Nov 7 2026, judge = the maintainer's model through Hermes):
 
 ```
-👀 Watch #3 started · planning…
+👀 Watch #1 started · planning…
 Condition: they announce the price
-/watching for status · /wakeme stop 3
+/wakeme list for status · /wakeme stop 1
 
-📋 Watch #3 · Acme Phone X launch keynote (synthetic demo) (demo stream)
-Listening for: "the price is", "pricing is", "we're pricing it at", "it will cost" · On-screen: "(?i)\b(price|pricing)\b\s*[:\-]?\s*\$?\s?\d", "(?i)\$\s?\d{1,3}([,.]\d{3})*(\.\d{2})?"
+📋 Watch #1 · Acme Phone X launch keynote (synthetic demo) (demo stream)
+Listening for: “the price is”, “priced at”, “price point”, “the cost is”… · Watching the screen for: price on screen
 I'll ping you here.
 
 🔔 It's happening: they announce the price
-“Acme Phone X starts at just $799.” (14:18, 0:51 into the stream)
-▶ Jump in: demo://keynote (at 0:48)
-/wakeme clip 3 · /wakeme notit 3 · /wakeme stop 3
+“Acme Phone X starts at just seven hundred and ninety nine dollars.” (18:53, 0:52 into the stream)
+▶ Jump in: demo://keynote (at 0:49)
+Reply “clip”, “not it” or “stop”.
 ```
 
 ![A watch, its plan, the alert and the clip](docs/screenshots/alert.png)
