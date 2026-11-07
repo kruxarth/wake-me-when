@@ -36,7 +36,8 @@ RERANK_INSTRUCTIONS = """WAKEME_FIND
 You search a recording's transcript for the moments that answer the user's question.
 You get numbered passages "[id] (m:ss) text". Return up to 5 passages that best answer it, best
 first, each with score 0..1 and evidence: the most relevant exact sentence (under 25 words).
-Only include passages that really match; return an empty list if none do. JSON only."""
+Only include passages that really match; return an empty list if none do. JSON only:
+{"results": [{"passage_id": <id>, "score": <0..1>, "evidence": "<sentence>"}]}"""
 
 
 @dataclass
@@ -221,7 +222,7 @@ def rank(passages: list[Passage], question: str,
             by_id = {p.pid: p for p in shortlist}
             hits = []
             for r in (parsed or {}).get("results", []):
-                p = by_id.get(int(r.get("passage_id", -1)))
+                p = by_id.get(int(r.get("passage_id", r.get("id", -1))))  # some models shorten the key
                 if p is None or float(r.get("score") or 0) < 0.35:
                     continue
                 start, ev = best_cue(p, question, str(r.get("evidence") or ""))

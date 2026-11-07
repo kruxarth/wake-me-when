@@ -85,3 +85,20 @@ def test_window_overlap_text_is_not_stored_twice():
     assert trim_overlap(prev, "A different sentence entirely") == "A different sentence entirely"
     assert trim_overlap("we rise together", "rise together") == ""          # fully repeated: dropped
     assert trim_overlap("it costs five", "five dollars") == "five dollars"   # one-word overlap is kept
+
+
+def test_find_rerank_uses_model_hits_even_with_shortened_key():
+    from wake_me_when.wakeme import vod
+    segs = [(float(t), f"filler sentence number {t}") for t in range(0, 120, 5)]
+    segs.append((52.3, "So, how much is it? Acme Phone X starts at just seven hundred and ninety nine dollars."))
+    segs.sort()
+    passages = vod.passages_from(segs)
+    target = next(p for p in passages if "how much" in p.text)
+
+    def rerank(instructions, text, schema):
+        return {"results": [{"id": target.pid, "score": 0.95,
+                             "evidence": "Acme Phone X starts at just seven hundred and ninety nine dollars."}]}
+
+    hits, used_model = vod.rank(passages, "when do they announce the price", rerank)
+    assert used_model and len(hits) == 1
+    assert abs(hits[0].start - 52.3) < 0.01
