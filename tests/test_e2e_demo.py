@@ -47,7 +47,7 @@ def test_demo_watch_alerts_clips_catches_up_and_cleans_up(tmp_path):
     assert time.time() - t0 < 35, time.time() - t0
     alert = next(t for t in ctx.texts() if t.startswith("🔔"))
     assert "starts at just seven hundred" in alert
-    assert "/wakeme clip 1 · /wakeme notit 1 · /wakeme stop 1" in alert
+    assert alert.rstrip().endswith("Reply “clip”, “not it” or “stop”.") and "/wakeme" not in alert
     assert "0:52" in alert                              # stream time comes from the row, not the model
 
     # alert latency: how long after the price audio reached ffmpeg did the alert go out
@@ -76,6 +76,7 @@ def test_demo_watch_alerts_clips_catches_up_and_cleans_up(tmp_path):
 
     hint = app.context_for(session_id="s1")
     assert "#1" in hint and "they announce the price" in hint
+    assert "Watch #1 alerted most recently" in hint and "wakeme_feedback" in hint and "watch_id 1" in hint
 
     assert _wait(lambda: w.ingest and w.ingest.proc and w.ingest.proc.poll() is not None, 30)  # media over:
     time.sleep(2)                                       # the watch now waits in its post-alert grace window
@@ -172,7 +173,7 @@ def test_register_against_fake_ctx_matches_manifest():
     manifest = yaml.safe_load((ROOT / "plugin.yaml").read_text())
     assert sorted(ctx.tools) == sorted(manifest["provides_tools"])
     assert sorted(ctx.hooks) == sorted(manifest["provides_hooks"])
-    assert {"wakeme", "watching", "catchup"} <= set(ctx.commands)
+    assert set(ctx.commands) == {"wakeme"}                # one slash command; list/catchup are subcommands
     assert "wake-me-when" in ctx.skills and "wakeme" in ctx.cli
     assert set(ctx.tasks) == {"wakeme_judge", "wakeme_vision"}
     assert set(manifest["config_schema"]) == set(__import__("wake_me_when.wakeme.config", fromlist=["SCHEMA"]).SCHEMA)
@@ -211,3 +212,22 @@ def test_pipe_source_runs_in_one_process_group_and_dies_together(tmp_path):
     ing.stop()
     left = subprocess.run(["pgrep", "-g", str(pg)], capture_output=True, text=True).stdout.strip()
     assert left == ""
+
+
+@needs_ffmpeg
+def test_plan_model_turns_on_repeat_mode_and_card_is_plain():
+    ctx = FakeCtx(llm=FakeLLM(plan={"summary": "camera mentioned", "cue_phrases": ["camera"],
+                                    "ocr_patterns": [r"\bcam(era)?\b"], "screen_label": "the word camera",
+                                    "visual_question": None, "negative_cues": [], "confirm": "once",
+                                    "min_confidence": 0.6, "mode": "every", "cooldown_min": 2}))
+    app = App(ctx, Store(), {"wakeme_judge"})
+    app.watch("demo://keynote?speed=4 anytime the camera comes up", SESSION)  # "anytime": regex catches it too
+    app.watch("demo://launch?speed=4 the camera comes up", SESSION)           # only the model sees "repeat"
+    assert _wait(lambda: sum(t.startswith("📋") for t in ctx.texts()) == 2, 20), ctx.texts()
+    card = next(t for t in ctx.texts() if t.startswith("📋 Watch #2"))
+    assert "Alerting every time, at most once every 2 min." in card
+    assert "Watching the screen for: the word camera" in card or "tesseract" in card
+    assert "\\b" not in card
+    assert app.mgr.get(2).req.mode == "every" and app.store.watch(2)["mode"] == "every"
+    assert app.mgr.get(1).req.cooldown_min == 5                               # the user's words win
+    app.stop("all")

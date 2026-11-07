@@ -1,4 +1,4 @@
-"""Slash commands (/wakeme, /watching, /catchup), the pre_llm_call hook, the CLI command, the blueprint."""
+"""The /wakeme slash command, the pre_llm_call hook, the CLI command, the blueprint."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from . import doctor
 from .app import HELP, App, session_from_kwargs
 
 log = logging.getLogger(__name__)
+
+WRONG = {"wrong", "notit", "not-it", "nope"}  # documented: wrong; the rest are older spellings
 
 
 def wakeme(app: App) -> Callable[..., str]:
@@ -24,8 +26,12 @@ def wakeme(app: App) -> Callable[..., str]:
         if sub == "clip":
             path, msg = app.clip(rest)
             return f"{msg}\nMEDIA:{path}" if path else msg
-        if sub in {"notit", "not-it", "nope"}:
+        if sub == "not" and rest.lower().split(" ", 1)[0] == "it":  # "/wakeme not it"
+            sub, rest = "wrong", rest[2:].strip()
+        if sub in WRONG:
             target, _, note = rest.partition(" ")
+            if target and not target.lstrip("#").isdigit():  # "/wakeme wrong that was a tease"
+                target, note = "", rest
             return app.not_it(target, note.strip())
         if sub == "stop":
             return app.stop(rest)
@@ -38,18 +44,6 @@ def wakeme(app: App) -> Callable[..., str]:
         if sub == "catchup":
             return app.catchup(rest)
         return app.watch(text, session)
-    return handler
-
-
-def watching(app: App) -> Callable[..., str]:
-    def handler(raw: str = "", **kw: Any) -> str:
-        return app.watching(session_from_kwargs(kw))
-    return handler
-
-
-def catchup(app: App) -> Callable[..., str]:
-    def handler(raw: str = "", **kw: Any) -> str:
-        return app.catchup(raw)
     return handler
 
 

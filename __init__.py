@@ -48,10 +48,7 @@ def register(ctx: Any) -> None:
     _APP = app
 
     ctx.register_command("wakeme", commands.wakeme(app), description="Watch a live stream and wake me at the moment",
-                         args_hint="<url> when <condition> | find | clip | notit | stop | doctor")
-    ctx.register_command("watching", commands.watching(app), description="List Wake Me When watches")
-    ctx.register_command("catchup", commands.catchup(app), description="Catch up on a watched stream",
-                         args_hint="[id] [minutes]")
+                         args_hint="<url> when <condition> | list | catchup | clip | stop | doctor")
     for name, handler in tools.handlers(app).items():
         ctx.register_tool(name=name, toolset="wake_me_when", schema=tools.SCHEMAS[name], handler=handler)
     skill = Path(__file__).parent / "skills" / "wake-me-when" / "SKILL.md"

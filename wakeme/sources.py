@@ -265,6 +265,34 @@ def probe_duration(target: str, whitelist: str) -> Optional[float]:
         return None
 
 
+_MEDIA_EXT = re.compile(r"\.(?:mp4|mkv|webm|mp3|wav|m4a|mov)$", re.I)
+
+
+def looks_recorded(url: str) -> bool:
+    """No-network guess that a link is a recording, for a hint only."""
+    kind = classify(url)
+    path = urlparse(url).path
+    return (kind == "file" or (kind == "twitch" and "/videos/" in url)
+            or (kind == "youtube" and "/live" not in path) or (kind == "http" and bool(_MEDIA_EXT.search(path))))
+
+
+def is_recording(url: str, kind: str) -> bool:
+    """Whether a checked link is a recording to search rather than a stream to watch (``demo://`` is a
+    stream). May touch the network (yt-dlp metadata, ffprobe), so only for a question-shaped request."""
+    if kind in {"demo", "rtsp"}:
+        return False
+    if kind == "file":
+        return True
+    if kind == "twitch":
+        return "/videos/" in url
+    if kind == "youtube":
+        if "/live" in urlparse(url).path:
+            return False
+        info = ytdlp_info(url, fmt=None, timeout=45)
+        return not info.get("is_live") and info.get("live_status") != "is_upcoming"
+    return probe_duration(url, NET_WHITELIST) is not None
+
+
 def resolve(url: str, kind: str) -> Source:
     """Network-touching resolution. Runs on the watcher thread, never in a command handler."""
     need("ffmpeg")

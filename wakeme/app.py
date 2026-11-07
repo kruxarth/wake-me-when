@@ -15,10 +15,10 @@ from .watcher import Manager
 log = logging.getLogger(__name__)
 
 HELP = """Wake Me When — watches live streams and pings you at the moment.
-/wakeme <url> when <condition> [--every [min]]   start a watch
-/wakeme find <url> <question>                    search a recording for a moment
-/wakeme clip <id> · /wakeme notit <id> [note] · /wakeme stop <id|all>
-/watching · /catchup [id] [minutes] · /wakeme doctor
+/wakeme <url> when <condition>     watch (say "every time …" for repeats)
+/wakeme <recording url> <question> find the moment in a recording
+/wakeme list · /wakeme catchup [id] · /wakeme clip [id] · /wakeme stop [id|all]
+After an alert, just reply: clip · not it · stop      (/wakeme doctor checks setup)
 Try: /wakeme demo://keynote when they announce the price"""
 
 
@@ -59,11 +59,26 @@ class App:
     # ---- watch ---------------------------------------------------------------------------------
 
     def watch(self, raw: str, session: dict) -> str:
+        """``/wakeme <url> <text>``: "when …" watches; a question about a recording searches it (find);
+        a question about a live stream, or unclear wording, watches."""
         try:
             req = planmod.parse_watch(raw)
         except ValueError as exc:
             return str(exc)
-        return self.start_watch(req, session)
+        if req.phrasing == "search":
+            s = self.settings()
+            try:
+                kind = sources.check_url(req.url, surface=session.get("platform", ""),
+                                         allow_private=s.allow_private_network, allowed_dirs=s.allowed_media_dirs)
+                recording = sources.is_recording(req.url, kind)
+            except sources.SourceError as exc:
+                return f"❌ {exc}"
+            if recording:
+                return self.find(raw, session)
+        reply = self.start_watch(req, session)
+        if req.phrasing == "unclear" and reply.startswith("👀") and sources.looks_recorded(req.url):
+            reply += "\nIf this is a recording, /wakeme find <url> <question> searches it instead."
+        return reply
 
     def start_watch(self, req: planmod.WatchRequest, session: dict) -> str:
         s = self.settings()
@@ -78,10 +93,10 @@ class App:
             return f"❌ {exc}"
         every = f" (every time, {req.cooldown_min:g} min cooldown)" if req.mode == "every" else ""
         lines = [f"👀 Watch #{w.id} started · planning…", f"Condition: {req.condition}{every}",
-                 f"/watching for status · /wakeme stop {w.id}"]
+                 f"/wakeme list for status · /wakeme stop {w.id}"]
         if session.get("platform") in notify.LOCAL_PLATFORMS:
             lines.append("It runs in your Hermes gateway and keeps going if you close this window; "
-                         "alerts that can't reach you wait in /watching.")
+                         "alerts that can't reach you wait in /wakeme list.")
         return "\n".join(lines)
 
     # ---- list / stop --------------------------------------------------------------------------
@@ -113,8 +128,11 @@ class App:
         if target == "all":
             ids = self.mgr.stop_all()
             return f"⏹ Stopped {len(ids)} watch(es)." if ids else "Nothing to stop."
+        if not target:
+            w, msg = self._watch_or_msg("")
+            return self.mgr.stop(w.id) if w else msg
         if not target.isdigit():
-            return "Usage: /wakeme stop <id|all>"
+            return "Usage: /wakeme stop [id|all]"
         return self.mgr.stop(int(target))
 
     # ---- feedback / clip / catch-up -------------------------------------------------------------
@@ -126,7 +144,7 @@ class App:
             if len(live) == 1:
                 return live[0], ""
             if not live:
-                return None, "No watch is running in this Hermes. /watching lists them."
+                return None, "No watch is running in this Hermes. /wakeme list shows them."
             return None, "Which watch? " + ", ".join(f"#{w.id} ({w.req.condition})" for w in live)
         if not target.isdigit():
             return None, "Give the watch number, e.g. /wakeme clip 3"
@@ -152,7 +170,7 @@ class App:
         return None, msg
 
     def catchup(self, raw: str) -> str:
-        """``/catchup [id] [minutes]``. A lone number is a watch id when such a watch runs, else minutes."""
+        """``/wakeme catchup [id] [minutes]``. A lone number is a watch id when such a watch runs, else minutes."""
         nums = [p.lstrip("#") for p in (raw or "").split()]
         nums = [p[:-1] if p.endswith("m") else p for p in nums]
         nums = [p for p in nums if re.fullmatch(r"\d+(?:\.\d+)?", p)]
@@ -208,8 +226,17 @@ class App:
             a = w.alerts[-1] if w.alerts else None
             state = w.status + (f", last alert {_ago(a['fired'])} ago: “{a['quote'][:120]}”" if a else "")
             lines.append(f"- #{w.id}: “{w.req.condition}” — {state}")
-        lines.append("If the user says clip / not it / stop / catch me up without a number, use the matching "
-                     "wakeme_* tool with that watch_id; if more than one watch fits, ask which.")
+        alerted = [w for w in mine if w.alerts]
+        last = max(alerted, key=lambda w: w.alerts[-1]["fired"]) if alerted else None
+        if last is not None:
+            lines.append(f"Watch #{last.id} alerted most recently. Each alert ends with “Reply clip, not it or "
+                         f"stop”, so a short reply right after one is about it: “clip” / “show me” → wakeme_clip; "
+                         f"“not it” / “wrong” / “nope” → wakeme_feedback (it keeps watching); “stop” → "
+                         f"wakeme_stop; “catch me up” → wakeme_catchup. Use watch_id {last.id} unless the user "
+                         "names another watch.")
+        else:
+            lines.append("If the user says clip / stop / catch me up without a number, use the matching wakeme_* "
+                         "tool with that watch_id; if more than one watch fits, ask which.")
         return "\n".join(lines)
 
     # ---- shutdown -------------------------------------------------------------------------------
