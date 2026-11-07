@@ -149,11 +149,14 @@ ASR busy 13 %. `PGREP after stop: (none)`.
 
 | Run | Plugin process CPU | ffmpeg/streamlink CPU | per watch | RSS plugin / media procs | ASR busy |
 |---|---|---|---|---|---|
-| 3 (2 live + demo) | 60 % | 95 % | ≈ 52 % of a core | 357 MB / 711 MB | 13 % |
+| 3 (2 live + demo)\* | 60 % | 95 % | ≈ 52 % of a core | 357 MB / 711 MB | 13 % |
 | 4 (3 live)\* | 98 % | 67 % | ≈ 55 % | 379 MB / 647 MB | 18 % |
 | 5 (3 Twitch) | 75 % | 139 % (incl. streamlink) | ≈ 71 % | 448 MB / 662 MB | 15 % |
 
-\* Runs 3 and 4 overlapped for ~6 minutes on the same machine.
+\* Runs 3 and 4 overlapped for ~6 minutes on the same machine, so their CPU/RSS figures include each
+other's processes (run 3 saw 7 ffmpegs). Run 3's `PGREP after stop` lists run 4's processes (paths under
+`harness-data4`); run 4's own check after stop is `(none)`. For per-watch cost use run 1 (≈ 52 % of a core
+per YouTube watch) and runs 5–8 (68–82 % per Twitch watch, streamlink included), which ran alone.
 
 **LLM calls:** 2–11 per watch-hour (`/watching` shows it live) with `semantic_check_sec=60`; the
 adaptive backoff stretches quiet watches to one periodic judge call every 4 min. Each watch also
