@@ -76,6 +76,11 @@ class Source:
     video_id: str = ""                                # YouTube id for &t= links
 
     @property
+    def paced(self) -> bool:
+        """Finite media played as if live (demo, local file, VOD) must be read in real time."""
+        return self.kind in {"demo", "file"} or not self.is_live
+
+    @property
     def label(self) -> str:
         names = {"demo": "demo stream", "youtube": "YouTube Live" if self.is_live else "YouTube",
                  "twitch": "Twitch", "hls": "HLS", "rtsp": "RTSP", "http": "web media", "file": "local file"}

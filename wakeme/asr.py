@@ -11,7 +11,7 @@ import collections
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 log = logging.getLogger(__name__)

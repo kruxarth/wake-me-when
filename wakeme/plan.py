@@ -124,13 +124,13 @@ def parse_watch(raw: str) -> WatchRequest:
         if m.group(1):
             cooldown = float(m.group(1))
         text = (" " + text).replace(m.group(0), " ").strip()
-    tokens = text.split()
+    tokens = [t.strip("<>") if t.startswith("<") else t for t in text.split()]
     url_idx = next((i for i, t in enumerate(tokens) if _URLISH.match(t)), None)
     if url_idx is None:
         raise ValueError("I need a stream link. Usage: /wakeme <url> when <condition>")
     url = tokens.pop(url_idx)
     cond = " ".join(tokens).strip()
-    cond = re.sub(r"^(?:when|if|once|as soon as)\s+", "", cond, flags=re.I).strip(" ,.")
+    cond = re.sub(r"^(?:when|if|once|as soon as)\b\s*", "", cond, flags=re.I).strip(" ,.")
     if len(cond) < 3:
         raise ValueError("What should I wait for? Usage: /wakeme <url> when <condition>")
     return WatchRequest(url=url.strip("<>"), condition=cond[:300], mode=mode, cooldown_min=max(1.0, cooldown))

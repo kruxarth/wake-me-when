@@ -45,8 +45,8 @@ fallible (timeouts, Stage-A-only mode). Direct `ctx.llm` latency is measured in 
 
 ## 1d. Clip from the segment ring
 
-`ffmpeg -f concat -protocol_whitelist file -i list.txt -ss 2 -t 15 -c:v libx264 -preset veryfast`
-on three 4 s Twitch segments: 0.8 s wall, 10.6 s / 734 KB mp4.
+Concatenating three 4 s Twitch segments with ffmpeg's concat demuxer (file protocol only) and
+re-encoding 15 s with x264 `veryfast`: 0.8 s wall, 10.6 s / 734 KB mp4.
 
 ## 1e. Hermes surface probe (`spike/probe`, isolated `HERMES_HOME`, stub OpenAI server)
 

@@ -1,0 +1,169 @@
+"""End to end: a real ffmpeg ingest of demo://keynote?speed=4 with a stubbed LLM, no network."""
+
+import json
+import os
+import subprocess
+import time
+
+import pytest
+import yaml
+
+from conftest import ROOT, FakeCtx, FakeLLM, needs_ffmpeg
+from wake_me_when.wakeme import sources
+from wake_me_when.wakeme.app import App
+from wake_me_when.wakeme.store import Store
+
+PRICE = json.loads((sources.DEMO_DIR / "demos.json").read_text())["keynote"]["moments"]["price"]
+SESSION = {"session_key": "agent:main:telegram:dm:1", "session_id": "s1", "platform": "telegram"}
+
+
+def _wait(pred, timeout):
+    end = time.time() + timeout
+    while time.time() < end:
+        if pred():
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def _ffmpeg_children():
+    out = subprocess.run(["pgrep", "-f", "keynote.mp4"], capture_output=True, text=True).stdout.split()
+    return [p for p in out if int(p) != os.getpid()]
+
+
+@needs_ffmpeg
+def test_demo_watch_alerts_clips_catches_up_and_cleans_up(tmp_path):
+    ctx = FakeCtx()
+    app = App(ctx, Store(), {"wakeme_judge"})
+    t0 = time.time()
+    reply = app.watch("demo://keynote?speed=4 when they announce the price", SESSION)
+    assert reply.startswith("👀 Watch #1 started · planning…")
+    assert time.time() - t0 < 1.0                       # instant: no network, no model before the reply
+
+    assert _wait(lambda: any(t.startswith("📋 Watch #1") for t in ctx.texts()), 20)
+    assert _wait(lambda: any(t.startswith("🔔") for t in ctx.texts()), 60), ctx.texts()
+    alert = next(t for t in ctx.texts() if t.startswith("🔔"))
+    assert "starts at just seven hundred" in alert
+    assert "/wakeme clip 1 · /wakeme notit 1 · /wakeme stop 1" in alert
+    assert "0:52" in alert                              # stream time comes from the row, not the model
+
+    # alert latency: how long after the price audio reached ffmpeg did the alert go out
+    ev = app.store.events(1, "alert")[0]
+    assert ev["latency_from_arrival"] < 30
+    w = app.mgr.get(1)
+    assert w.status == "fired"
+    # the judge only ever saw the plugin's own aux task
+    assert all(task == "wakeme_judge" for kind, name, task in ctx.llm.calls if name.startswith("WAKEME"))
+
+    path, msg = app.clip("1")
+    assert path is not None and path.exists() and "ninety nine" in msg
+
+    summary = app.catchup("1")
+    assert summary.startswith("📺 Catch-up · watch #1")
+
+    listing = app.watching(SESSION)
+    assert "#1 · Acme Phone X" in listing and "fired" in listing
+
+    hint = app.context_for(session_id="s1")
+    assert "#1" in hint and "they announce the price" in hint
+
+    assert app.stop("1") == "⏹ Stopped watch #1."
+    assert app.store.watch(1)["status"] in {"stopped", "ended"}
+    assert _wait(lambda: not _ffmpeg_children(), 10), _ffmpeg_children()
+
+
+@needs_ffmpeg
+def test_not_it_resumes_and_negative_example_reaches_judge():
+    seen = []
+
+    def judge(text):
+        seen.append(text)
+        if "Rejected moments" in text:
+            return {"matched": False, "confidence": 0.2, "evidence_quote": "", "evidence_row_ids": [], "reason": "x"}
+        import re
+        rid = re.findall(r"^\[(\d+)\] .*waiting to hear", text, re.M)
+        if rid:
+            return {"matched": True, "confidence": 0.9, "evidence_quote": "waiting to hear",
+                    "evidence_row_ids": [int(rid[0])], "reason": "tease"}
+        return {"matched": False, "confidence": 0.1, "evidence_quote": "", "evidence_row_ids": [], "reason": "no"}
+
+    ctx = FakeCtx(llm=FakeLLM(judge_fn=judge, plan={"summary": "s", "cue_phrases": ["waiting to hear", "dollars"],
+                                                    "ocr_patterns": [], "visual_question": None,
+                                                    "negative_cues": [], "confirm": "once",
+                                                    "min_confidence": 0.6}))
+    app = App(ctx, Store(), {"wakeme_judge"})
+    app.watch("demo://keynote?speed=4 when they announce the price", SESSION)
+    assert _wait(lambda: any(t.startswith("🔔") for t in ctx.texts()), 60)
+    assert "waiting to hear" in next(t for t in ctx.texts() if t.startswith("🔔"))
+    assert app.not_it("1", "that was a tease").startswith("👍")
+    assert app.mgr.get(1).status == "watching"
+    assert _wait(lambda: any("Rejected moments" in s and "tease" in s for s in seen), 40)
+    app.stop("1")
+
+
+@needs_ffmpeg
+def test_llm_outage_falls_back_to_unconfirmed_cue_alerts():
+    ctx = FakeCtx(llm=FakeLLM())
+    app = App(ctx, Store(), set())
+    app.watch("demo://keynote?speed=4 when they announce the price", SESSION)
+    assert _wait(lambda: any(t.startswith("📋") for t in ctx.texts()), 20)
+    ctx.llm.fail = True                                   # provider goes down after planning
+    assert _wait(lambda: any(t.startswith("🔔") for t in ctx.texts()), 60), ctx.texts()
+    assert "unconfirmed" in next(t for t in ctx.texts() if t.startswith("🔔"))
+    app.stop("1")
+
+
+def test_plan_failure_ends_watch_with_reason():
+    ctx = FakeCtx(llm=FakeLLM(fail=True))
+    app = App(ctx, Store(), set())
+    app.watch("demo://keynote when they announce the price", SESSION)
+    assert _wait(lambda: any(t.startswith("❌ Watch #1 couldn't plan") for t in ctx.texts()), 30), ctx.texts()
+    assert app.store.watch(1)["status"] == "ended"
+
+
+def test_max_watches_counts_every_live_watch():
+    ctx = FakeCtx(settings={"max_watches": 1})
+    store = Store()
+    other = store.create_watch("demo://launch", "demo", "x", "once", "", "", "telegram")
+    store.update_watch(other, status="watching", owner=f"{os.getppid()}:")  # a live watch of another process
+    app = App(ctx, store, set())
+    assert "max_watches" in app.watch("demo://keynote when they announce the price", SESSION)
+
+
+def test_orphans_marked_stopped_on_load():
+    store = Store()
+    wid = store.create_watch("demo://launch", "demo", "x", "once", "", "", "telegram")
+    store.update_watch(wid, status="watching", owner="999999999:1")
+    assert store.mark_orphans() == 1
+    row = store.watch(wid)
+    assert row["status"] == "stopped" and row["note"] == "gateway restart"
+
+
+def test_register_against_fake_ctx_matches_manifest():
+    import wake_me_when
+    ctx = FakeCtx()
+    wake_me_when.register(ctx)
+    manifest = yaml.safe_load((ROOT / "plugin.yaml").read_text())
+    assert sorted(ctx.tools) == sorted(manifest["provides_tools"])
+    assert sorted(ctx.hooks) == sorted(manifest["provides_hooks"])
+    assert {"wakeme", "watching", "catchup"} <= set(ctx.commands)
+    assert "wake-me-when" in ctx.skills and "wakeme" in ctx.cli
+    assert set(ctx.tasks) == {"wakeme_judge", "wakeme_vision"}
+    assert set(manifest["config_schema"]) == set(__import__("wake_me_when.wakeme.config", fromlist=["SCHEMA"]).SCHEMA)
+    # every tool handler returns JSON, never raises, even on garbage input
+    for name, (schema, handler) in ctx.tools.items():
+        if name in {"wakeme_watch", "wakeme_find"}:
+            continue
+        json.loads(handler({"watch_id": "nope"}).split("\nMEDIA:")[0])
+    assert ctx.commands["wakeme"]("").startswith("Wake Me When")
+    assert ctx.hooks["pre_llm_call"](session_id="none") is None
+    for cb in ctx.unload:
+        cb()
+
+
+def test_gateway_chat_cannot_watch_local_files(tmp_path):
+    f = tmp_path / "a.mp4"
+    f.write_bytes(b"x")
+    app = App(FakeCtx(), Store(), set())
+    assert "allowed_media_dirs" in app.watch(f"{f} when anything", SESSION)
+    pytest.importorskip("yaml")

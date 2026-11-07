@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .sources import FILE_WHITELIST, Source
+from .sources import Source
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def build_ffmpeg_argv(ffmpeg: str, src: Source, workdir: Path, frames: bool) -> 
     argv = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"] if src.pipe_argv is None else \
            [ffmpeg, "-hide_banner", "-loglevel", "error"]
     for url in src.inputs:
-        if not src.is_live:
+        if src.paced:
             argv += ["-readrate", f"{src.speed:g}"]
         if src.kind in {"youtube", "hls", "http"} and src.is_live:
             argv += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10"]
