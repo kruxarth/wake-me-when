@@ -22,11 +22,12 @@ plugin's job.
 
 | User intent | Tool |
 |---|---|
-| "wake me / ping me / tell me when … <live link>" | `wakeme_watch(url, condition)`; add `every_minutes` only if they want every occurrence |
+| "wake me / ping me / tell me when … <live link>" | `wakeme_watch(url, condition)`; "every time …" in the condition alerts on each occurrence |
 | "where in this video do they talk about …", "find the part where …" (a recording) | `wakeme_find(url, question)` |
 | "what's being watched?", "any alerts?" | `wakeme_list` |
 | "clip", "send me the clip", "show me" after an alert | `wakeme_clip(watch_id)` |
-| "not it", "wrong", "that wasn't it" after an alert | `wakeme_feedback(watch_id, note)` |
+| "not it", "wrong", "nope", "that's not it" after an alert | `wakeme_feedback(watch_id, note)`; the watch keeps going |
+| "stop" after an alert | `wakeme_stop(watch_id)` |
 | "catch me up", "what did I miss?" | `wakeme_catchup(watch_id, minutes?)` |
 | "stop watching" | `wakeme_stop(watch_id or "all")` |
 
@@ -35,12 +36,14 @@ plugin's job.
 - Pass the user's condition in their own words; the plugin plans the cues itself.
 - `wakeme_watch` returns at once. The plan and the alert arrive later as separate messages from the
   plugin, not from you. Don't promise a time; say it will ping them here.
-- Alerts are posted outside the conversation, so you won't see them in history. A short
-  "[Wake Me When plugin] Watches in this chat" note is added to the user's turn while watches exist:
-  use it to map a plain "clip" / "not it" / "stop" to a watch id. If more than one watch could match,
-  ask which one. Never guess an id.
-- The explicit commands always work and are worth telling the user: `/wakeme clip <id>`,
-  `/wakeme notit <id>`, `/wakeme stop <id>`, `/watching`, `/catchup <id>`.
+- Alerts are posted outside the conversation, so you won't see them in history. Each alert ends
+  with "Reply clip, not it or stop", and while watches exist a "[Wake Me When plugin] Watches in this
+  chat" note is added to the user's turn naming the watch that alerted most recently. A short reply
+  like "clip", "not it" or "stop" right after an alert is about that watch: call the matching tool
+  with its id. If the note names no recent alert and more than one watch could match, ask which one.
+  Never guess an id.
+- The one slash command is `/wakeme` (`/wakeme list`, `/wakeme catchup`, `/wakeme clip`,
+  `/wakeme stop`); the id is optional when one watch is running.
 - When `wakeme_clip` succeeds, the video is attached automatically; just say what it shows.
 - For a first try without a real stream, suggest `demo://keynote` (a synthetic launch event where the
   price is announced) or `demo://launch` (a countdown with a hold).

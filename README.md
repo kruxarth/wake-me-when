@@ -58,9 +58,9 @@ extra, one-time ~150 MB model download), runs a 20-second demo watch and prints 
 /wakeme demo://keynote when they announce the price
 ```
 
-Add `?speed=4` to the demo link to run it four times faster. Then try `/wakeme clip 1`,
-`/catchup 1` and `/watching`. Or just ask the agent: *"wake me when the keynote gets to pricing
-https://youtube.com/…"*.
+Add `?speed=4` to the demo link to run it four times faster. When the alert arrives, reply
+**clip**, **not it** or **stop**; `/wakeme list` and `/wakeme catchup` show what's going on. Or just ask
+the agent: *"wake me when the keynote gets to pricing https://youtube.com/…"*.
 
 ## Examples
 
@@ -72,11 +72,15 @@ https://youtube.com/…"*.
 | `/wakeme <council meeting stream> when agenda item 7 on the bike lane comes up` | "item seven", "bike lane", the agenda slide |
 | `/wakeme <launch coverage> when it's T-minus 1 minute, or if it's scrubbed` | "T minus one minute", "scrub", "hold", "T-01:00" on screen |
 | `/wakeme <nature cam> when a bear catches a fish` | a vision-model check on changed keyframes |
-| `/wakeme find https://youtu.be/… where do they splash down` | ranked timestamps with deep links (`&t=…s`) in a recording |
+| `/wakeme https://twitch.tv/somestreamer every time they mention the giveaway` | each mention, at most one alert per 5 min ("…, at most every 10 minutes" changes that) |
+| `/wakeme https://youtu.be/… where do they splash down` | a recording plus a question: ranked timestamps with deep links (`&t=…s`) |
 
 ![find in a recording: one model rerank over the captions](docs/screenshots/find.png)
 
-`--every [minutes]` keeps watching after the first alert, with a cooldown (default 5 min).
+"Every time …", "each time …" or "whenever …" keeps watching after the first alert, with a cooldown
+(default 5 min). A recording link with a question ("where…", "what time…", "find…") searches it;
+a live stream, or a condition starting with "when", is watched. `/wakeme find <url> <question>` always
+searches.
 
 ## How it works
 
@@ -97,41 +101,54 @@ https://youtube.com/…"*.
   confirm/debounce: ≥ 0.85 fires; otherwise a 2nd positive after newer speech · never re-fires on old evidence
                                               ▼
   🔔 alert (time from the rows, never from the model) · evidence segments copied out of the ring
-     → /wakeme clip any time later · rolling 10-min summaries → /catchup
+     → reply "clip" any time later · rolling 10-min summaries → /wakeme catchup
 ```
 
 - **One plan per watch.** A single structured call turns your condition into cue phrases (with
-  speech-recognition misspellings), on-screen regexes, an optional visual question and phrases
-  that mean "not yet" ("we'll get to that in a moment").
+  speech-recognition misspellings), on-screen text patterns, an optional visual question, phrases
+  that mean "not yet" ("we'll get to that in a moment") and whether you asked for every occurrence.
+  The plan card shows the phrases and a plain label for the screen patterns, never the regexes.
 - **The judge never invents times.** It cites transcript row ids; the plugin maps them to stream
   time and falls back to fuzzy-matching the quote.
-- **"Not it" teaches it.** `/wakeme notit 3` resumes the watch and shows the judge that moment as
-  a negative example.
+- **"Not it" teaches it.** Replying *not it* (or `/wakeme wrong`) resumes the watch and shows the
+  judge that moment as a negative example.
 - **Budgets.** The periodic paraphrase check backs off from 60 s to 4 min while the stream stays
   clearly off-topic and snaps back on any cue hit. At most `max_llm_calls_per_hour` model calls per
   watch (default 60). When the
   budget runs out, or the provider is down, it keeps watching with Stage A only and fires on strong
   cue matches, clearly marked *unconfirmed* — it never misses silently.
 - **Clips survive the ring.** At alert time the segments around the evidence are copied out of the
-  rotating ring, so `/wakeme clip 3` minutes later still has the moment. The MP4 is cut on demand
+  rotating ring, so a *clip* reply minutes later still has the moment. The MP4 is cut on demand
   and attached as native video.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `/wakeme <url> when <condition> [--every [min]]` | Start a watch. Replies instantly; the plan follows. |
-| `/wakeme find <url> <question>` | Search a recording (YouTube, media link, local file, demo) |
-| `/wakeme clip <id>` | The clip of the last alert (or the last 20 s if none) |
-| `/wakeme notit <id> [why]` | Last alert was wrong: resume and learn |
-| `/wakeme stop <id\|all>` | Stop watches |
-| `/watching` | Watches, status (`planning`, `watching`, `behind`, `fired`, `stopped`, `ended`), uptime, alerts, model calls/h, missed alerts |
-| `/catchup [id] [minutes]` | What happened since the start, the last alert, or the last N minutes |
+Everything is one command, `/wakeme`:
+
+```
+/wakeme <url> when <condition>     watch (say "every time …" for repeats)
+/wakeme <recording url> <question> find the moment in a recording
+/wakeme list · /wakeme catchup [id] · /wakeme clip [id] · /wakeme stop [id|all]
+After an alert, just reply: clip · not it · stop      (/wakeme doctor checks setup)
+```
+
+| Command | What it does |
+|---|---|
+| `/wakeme <url> when <condition>` | Start a watch. Replies instantly; the plan follows. |
+| `/wakeme <recording url> <question>` | Search a recording (YouTube, media link, local file); `/wakeme find <url> <question>` forces a search |
+| `/wakeme list` | Watches, status (`planning`, `watching`, `behind`, `fired`, `stopped`, `ended`), uptime, alerts, model calls/h, missed alerts |
+| `/wakeme catchup [id] [minutes]` | What happened since the start, the last alert, or the last N minutes |
+| `/wakeme clip [id]` | The clip of the last alert (or the last 20 s if none) |
+| `/wakeme stop [id\|all]` | Stop watches |
 | `/wakeme doctor` · `hermes wakeme doctor` | Dependency check + 20 s demo watch |
 
-Plain replies like "clip" or "not it" also work through the agent: while a chat has watches, the
-plugin adds a one-line note about them to your turn so the agent can map the reply to a watch (and
-asks which one if it's ambiguous).
+The id is optional when one watch is running. After an alert, a plain reply works: *clip* sends the
+video, *not it* (or *wrong*, *nope*) resumes the watch and learns from the miss, *stop* ends it.
+Hermes doesn't let a plugin read chat messages, so the agent handles these: while a chat has watches,
+the plugin adds a short note to your turn naming the watch that just alerted, and the agent calls the
+matching tool. `/wakeme wrong [id] [why]` does the same as *not it* without the agent.
 
 ## Agent tools
 
@@ -204,9 +221,9 @@ Measured on Nov 7 2026 ([TESTING.md](TESTING.md) has the breakdown):
   sign in. The plugin says so clearly and never reads browser cookies. `find` falls back to local
   speech recognition when captions are refused.
 - A watch lives in the Hermes gateway process. Restarting the gateway stops it (it shows as
-  `stopped (gateway restart)` in `/watching`).
+  `stopped (gateway restart)` in `/wakeme list`).
 - In the classic `hermes chat` CLI, Hermes doesn't display plugin messages, so alerts there show up
-  in `/watching` ("Alerts you may have missed"). Telegram/Discord/Slack, the TUI and Desktop show them
+  in `/wakeme list` ("Alerts you may have missed"). Telegram/Discord/Slack, the TUI and Desktop show them
   live.
 - Audio-only sources produce audio-only clips.
 - A moment that none of the plan's cue phrases or on-screen patterns catch waits for the periodic
@@ -218,7 +235,7 @@ Measured on Nov 7 2026 ([TESTING.md](TESTING.md) has the breakdown):
 - **Run `hermes wakeme doctor` first.** Every failed check prints the exact install command.
 - *"installing speech recognition"*: the first real watch installs Hermes's `stt-whisper` extra and
   downloads the model; `doctor` does this up front. If it says to restart, run `hermes gateway restart`.
-- *`behind` in /watching*: speech recognition can't keep up (too many watches or `small` on a slow
+- *`behind` in /wakeme list*: speech recognition can't keep up (too many watches or `small` on a slow
   CPU). Use `whisper_model: base` or fewer watches; audio is dropped oldest-first, ingest never stalls.
 - *YouTube: "Sign in to confirm you're not a bot" / 429*: wait a few minutes or use another source.
   Installing Deno (or having node/bun) helps yt-dlp read every format.
