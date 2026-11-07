@@ -1,0 +1,22 @@
+{
+  "keynote": {
+    "title": "Acme Phone X launch keynote (synthetic demo)",
+    "duration": 73.58,
+    "moments": {
+      "near_miss": 40.828,
+      "price": 52.308,
+      "price_repeat": 58.0,
+      "ship_date": 64.028
+    }
+  },
+  "launch": {
+    "title": "Starhopper Two launch coverage (synthetic demo)",
+    "duration": 73.82,
+    "moments": {
+      "hold": 16.14,
+      "resume": 38.472,
+      "t_minus_1": 50.144,
+      "liftoff": 62.272
+    }
+  }
+}
