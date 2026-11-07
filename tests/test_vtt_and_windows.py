@@ -76,3 +76,12 @@ def test_worker_queue_bounded_and_marks_behind():
         w.submit(asr.Job(1, i * 8.0, b"\x00\x00" * 100, i == 0, False, lambda s: None))
     assert w.backlog(1) == asr.MAX_QUEUE
     assert w.behind[1] is True
+
+
+def test_window_overlap_text_is_not_stored_twice():
+    from wake_me_when.wakeme.watcher import trim_overlap
+    prev = "Michigan is the capital of Arab America"
+    assert trim_overlap(prev, "capital of Arab America. I want to say just") == "I want to say just"
+    assert trim_overlap(prev, "A different sentence entirely") == "A different sentence entirely"
+    assert trim_overlap("we rise together", "rise together") == ""          # fully repeated: dropped
+    assert trim_overlap("it costs five", "five dollars") == "five dollars"   # one-word overlap is kept

@@ -30,6 +30,7 @@ config_schema:
   feedback_grace_min: {type: float, default: 10.0, description: "Minutes a fired watch keeps buffering so clip / not it still work"}
   clip_seconds: {type: int, default: 20, description: "Length of a clip"}
   auto_clip: {type: bool, default: false, description: "Cut the clip as soon as an alert fires"}
+  auto_attach_clip: {type: bool, default: true, description: "With allow_gateway_injection granted, ask the agent to attach the clip right after an alert (one agent turn)"}
   catchup_summary_min: {type: float, default: 10.0, description: "Minutes of speech per rolling catch-up summary"}
   keep_transcripts_days: {type: float, default: 7.0, description: "Days to keep transcripts and summaries"}
   keep_clips_days: {type: float, default: 2.0, description: "Days to keep clips you asked for"}

@@ -24,6 +24,17 @@ JUDGE_LOOKBACK_S = 150
 HIGH_CONF = 0.85
 
 
+def trim_overlap(prev: str, text: str, max_words: int = 12) -> str:
+    """Drop the words at the start of ``text`` that repeat the end of ``prev`` (overlapping windows
+    can transcribe the same 2 s twice with different segment boundaries)."""
+    pw, tw = cues.normalize(prev).split(), text.split()
+    nt = [cues.normalize(w) for w in tw]
+    for k in range(min(max_words, len(pw), len(tw)), 1, -1):
+        if pw[-k:] == [w for w in nt[:k] if w] and all(nt[:k]):
+            return " ".join(tw[k:]).strip()
+    return text
+
+
 class BudgetExceeded(Exception):
     pass
 
@@ -115,6 +126,8 @@ class Watch:
         self.ended = threading.Event()
         self.judge_latencies: list[float] = []
         self.trigger_judge = False
+        self.last_text, self.last_end = "", -1e9
+        self.ocr_at = 0.0
 
     # ---- helpers ------------------------------------------------------------------------------
 
@@ -351,12 +364,17 @@ class Watch:
         new: list[tuple[int, str]] = []
         while self.inbox:
             seg = self.inbox.popleft()
+            text = trim_overlap(self.last_text, seg.text) if seg.start - self.last_end < asr.OVERLAP_S + 1 else seg.text
+            if not text:
+                continue
             wall = self.ring.wall_at(seg.start) or time.time()
-            rid = self.store.add_row(self.id, seg.start, seg.end, wall, seg.text)
-            new.append((rid, seg.text))
+            rid = self.store.add_row(self.id, seg.start, seg.end, wall, text)
+            self.last_text, self.last_end = text, seg.end
+            new.append((rid, text))
         if not new or self.status == "fired" or self.plan is None:
             return
-        res = cues.match(new, self.plan.cue_phrases, self.plan.negative_cues, self.ocr_text, self.plan.ocr_patterns)
+        # speech only: on-screen text triggers from _maybe_frames when a NEW frame matches
+        res = cues.match(new, self.plan.cue_phrases, self.plan.negative_cues)
         self.stage_a_last = res if res.hit else self.stage_a_last
         if res.hit:
             self._maybe_judge(trigger=True)
@@ -381,15 +399,15 @@ class Watch:
         follow_up = self.pending_since_row is not None and new_speech
         if not (trigger or due or follow_up or (force_tail and new_speech)):
             return False
-        stage_a = cues.match(rows, self.plan.cue_phrases, self.plan.negative_cues, self.ocr_text,
-                             self.plan.ocr_patterns)
+        ocr = self.ocr_text if time.time() - self.ocr_at < 20 else ""
+        stage_a = cues.match(rows, self.plan.cue_phrases, self.plan.negative_cues, ocr, self.plan.ocr_patterns)
         self.last_judge = time.time()
         self.last_judged_row = rows[-1][0]
-        self.judge_future = self.judge_pool.submit(self._judge_call, rows, stage_a)
+        self.judge_future = self.judge_pool.submit(self._judge_call, rows, stage_a, ocr)
         return True
 
-    def _judge_call(self, rows: list[tuple[int, str]], stage_a: cues.StageAResult) -> dict:
-        text = build_judge_input(self.req.condition, rows, self.ocr_text, self.negatives)
+    def _judge_call(self, rows: list[tuple[int, str]], stage_a: cues.StageAResult, ocr: str = "") -> dict:
+        text = build_judge_input(self.req.condition, rows, ocr, self.negatives)
         t = time.time()
         try:
             parsed = self.structured(JUDGE_INSTRUCTIONS, text, JUDGE_SCHEMA, "wakeme_judge", "wakeme.judge",
@@ -473,10 +491,29 @@ class Watch:
             self.set_status("fired")
         else:
             self.cooldown_until = now + self.req.cooldown_min * 60
-        self.say(text, alert=True)
+        channel = self.say(text, alert=True)
         if self.s.auto_clip:
             self.side_pool.submit(self.clip)
+        if channel == "posted" and self.s.auto_attach_clip:
+            self.side_pool.submit(self._attach_clip)
         self.mgr.after_alert(self, alert)
+
+    def _attach_clip(self) -> None:
+        """P1 auto-attach: posts can't carry media, so (only when the user granted
+        allow_gateway_injection) ask the agent in this chat to fetch the clip with the wakeme_clip tool,
+        whose result Hermes delivers as native video. Without the grant this is a no-op returning False."""
+        injector = getattr(self.ctx, "inject_message", None)
+        key = self.session.get("session_key")
+        if injector is None or not key:
+            return
+        self.clip()  # cut it now so the tool call returns at once
+        try:
+            ok = injector(f"[Wake Me When] Watch #{self.id} just alerted. Call the wakeme_clip tool with "
+                          f"watch_id {self.id} and reply with one short line describing the clip.",
+                          role="user", session_key=key)
+        except Exception:
+            ok = False
+        self.store.event(self.id, "auto_attach", self.pos, injected=bool(ok))
 
     def _resnap(self) -> None:
         """Catch the segments after the moment once they exist (they're still being written at fire time)."""
@@ -510,9 +547,11 @@ class Watch:
             return
         self.last_ocr = now
         if self.plan.ocr_patterns:
-            self.ocr_text = vision.ocr(frame)
-            res = cues.match([], [], None, self.ocr_text, self.plan.ocr_patterns)
-            if res.ocr:
+            text = vision.ocr(frame)
+            changed = cues.normalize(text) != cues.normalize(self.ocr_text)
+            self.ocr_text, self.ocr_at = text, now
+            res = cues.match([], [], None, text, self.plan.ocr_patterns)
+            if res.ocr and changed:
                 self.store.event(self.id, "ocr_hit", self.pos, text=self.ocr_text[:200])
                 self._maybe_judge(trigger=True)
         if self.plan.visual_question and now - self.last_vision > 20:

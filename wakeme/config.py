@@ -18,6 +18,7 @@ SCHEMA: dict[str, tuple[str, Any, str]] = {
     "feedback_grace_min": ("float", 10.0, "Minutes a fired watch keeps buffering so clip / not it still work"),
     "clip_seconds": ("int", 20, "Length of a clip"),
     "auto_clip": ("bool", False, "Cut the clip as soon as an alert fires"),
+    "auto_attach_clip": ("bool", True, "With allow_gateway_injection granted, ask the agent to attach the clip right after an alert (one agent turn)"),
     "catchup_summary_min": ("float", 10.0, "Minutes of speech per rolling catch-up summary"),
     "keep_transcripts_days": ("float", 7.0, "Days to keep transcripts and summaries"),
     "keep_clips_days": ("float", 2.0, "Days to keep clips you asked for"),
@@ -41,6 +42,7 @@ class Settings:
     feedback_grace_min: float = 10.0
     clip_seconds: int = 20
     auto_clip: bool = False
+    auto_attach_clip: bool = True
     catchup_summary_min: float = 10.0
     keep_transcripts_days: float = 7.0
     keep_clips_days: float = 2.0

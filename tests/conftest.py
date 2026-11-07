@@ -92,7 +92,12 @@ class FakeCtx:
         self.posts = []
         self.commands, self.tools, self.hooks, self.skills, self.cli, self.tasks = {}, {}, {}, {}, {}, {}
         self.unload = []
+        self.injected = []
         self.lock = threading.Lock()
+
+    def inject_message(self, content, role="user", *, session_key=None, origin=None):
+        self.injected.append((session_key, content))
+        return False  # like Hermes without allow_gateway_injection
 
     def get_config(self, key, default=None):
         return self.settings.get(key, default)

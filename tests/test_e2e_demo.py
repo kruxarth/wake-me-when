@@ -57,6 +57,10 @@ def test_demo_watch_alerts_clips_catches_up_and_cleans_up(tmp_path):
     # the judge only ever saw the plugin's own aux task
     assert all(task == "wakeme_judge" for kind, name, task in ctx.llm.calls if name.startswith("WAKEME"))
 
+    # P1 auto-attach asked the agent (via inject_message, refused here: no grant) for this chat only
+    assert _wait(lambda: ctx.injected, 30)
+    assert ctx.injected[0][0] == SESSION["session_key"] and "wakeme_clip" in ctx.injected[0][1]
+
     path, msg = app.clip("1")
     assert path is not None and path.exists() and "ninety nine" in msg
 
@@ -182,3 +186,21 @@ def test_gateway_chat_cannot_watch_local_files(tmp_path):
     app = App(FakeCtx(), Store(), set())
     assert "allowed_media_dirs" in app.watch(f"{f} when anything", SESSION)
     pytest.importorskip("yaml")
+
+
+@needs_ffmpeg
+def test_pipe_source_runs_in_one_process_group_and_dies_together(tmp_path):
+    """Twitch path: streamlink | ffmpeg share a process group (regression: EPERM across sessions)."""
+    from wake_me_when.wakeme.ingest import AudioRing, Ingest
+    src = sources.Source(url="https://twitch.tv/x", kind="twitch", inputs=["pipe:0"],
+                         whitelist=sources.PIPE_WHITELIST,
+                         pipe_argv=["cat", str(sources.DEMO_DIR / "launch.mp4")])
+    ring = AudioRing()
+    ing = Ingest(src, tmp_path, frames=False, ring=ring)
+    ing.start()
+    assert _wait(lambda: ring.end_pos > 5, 15)
+    pg = os.getpgid(ing.proc.pid)
+    assert os.getpgid(ing.pipe.pid) == pg
+    ing.stop()
+    left = subprocess.run(["pgrep", "-g", str(pg)], capture_output=True, text=True).stdout.strip()
+    assert left == ""

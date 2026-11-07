@@ -2,54 +2,83 @@
 
 Running log so another session can pick up. Newest state first in each section.
 
+## Status (Nov 7, 14:20 IST)
+
+P0 is built and works end to end; 63 tests pass; `hermes plugins doctor --ci` and
+`hermes plugins validate --install-deps` are clean (security scan: safe). Submission drafts are in
+`../submission/`. Remaining: a live-stream true-positive run (in progress), TESTING.md, screenshots,
+Telegram E2E (needs the user), final polish.
+
 ## Environment found (Nov 7, 13:00 IST)
 
 - `hermes --version`: **v0.23.0** (`2bd378ed1b8d`, tag `v0.23.0`, released Nov 5), git install,
   Python 3.14.9 (Hermes-bundled CPython). `_ref/hermes-agent` is cloned at the same tag.
   (Pitfall: `git tag | sort -V` puts the old CalVer tags `v2026.9.x` above `v0.23.0`; use
-  `gh release list`.)
-- Model: `deepseek-flash` via DeepSeek. `hermes chat -q "reply with ok"` hung 120 s at 12:50 (gateway
-  log: HTTP 500 from the provider), then worked at 12:56 (44 s total). The provider is flaky today.
-- Gateway: running as a systemd user service. **`hermes status`: "Platforms: none configured"** —
-  Telegram is not connected yet, so the gateway E2E (step 6) needs the user to set up Telegram.
-- Permission question (install into real `~/.hermes`) asked at 12:51; no answer yet. Until then all
-  work uses `HERMES_HOME=./.hermes-dev` with a local stub OpenAI server (`spike/stub_llm.py`).
+  `gh release list`.) Hermes also ships its own ffmpeg 9.0.1 first on PATH.
+- Model: `deepseek-flash` via DeepSeek. `hermes chat -q "reply with ok"` hung 120 s at 12:50 (provider
+  HTTP 500s), worked at 12:56 (44 s). From 13:55 judge calls through `hermes chat -Q -q` took 4–7 s.
+- Gateway: systemd user service, running. **`hermes status`: "Platforms: none configured"** — Telegram
+  is not connected, so the gateway/Telegram E2E needs the user (steps in TESTING.md).
+- Permission question (install into real `~/.hermes`) asked at 12:51; **no answer yet**. All work uses
+  `HERMES_HOME=./.hermes-dev` + a local stub OpenAI server (`spike/stub_llm.py`), plus the live
+  harness (`spike/live_harness.py`) that runs the real pipeline outside Hermes with the user's model
+  via `hermes chat -Q -q`.
+- **Do not run `/wakeme doctor` (install mode) in `.hermes-dev`:** `pm.ensure_import` would install
+  `stt-whisper` into the *shared* Hermes environment under `~/.hermes/installs`. The dev home uses
+  `stt_backend: captions`; `hermes wakeme doctor --no-install` is safe.
+- To restart the dev gateway after code changes: `spike/devgw_stop.sh` (matches only the gateway whose
+  HERMES_HOME is `.hermes-dev`), then any `hermes chat` re-ensures it.
 
 ## Where the docs differ from the brief
 
-- `developer-guide/plugins/public-api.md` does not exist in v0.23.0. The list of importable modules
-  is `_PUBLIC` in `hermes_cli/plugin_validate_private_imports.py` (warning-only lint). We import only:
-  `plugins.plugin_storage`, `tools.url_safety:is_safe_url`, `agent.secret_scope` (unused so far),
-  `pm` (`available`, `ensure_import`, `InstallError`), `gateway.session_context:get_session_env`.
-- `tools.lazy_deps.ensure` / `LAZY_DEPS` are gone. Lazy installs go through `pm.ensure_import(extra)`,
-  which only accepts Hermes's own extras. Hermes ships `stt-whisper` = `faster-whisper==1.2.1`, so the
-  plugin uses that extra instead of declaring faster-whisper itself.
-- `hermes chat` is a gateway client: plugins run in the gateway process for every surface. See SPIKE.md 1e.
-- `ctx.post_message` does not deliver `MEDIA:`; posted messages are not in conversation history; the
-  classic CLI does not display posts (SPIKE.md 1e). → alerts also queue for `/watching`, a
-  `pre_llm_call` hook gives the agent watch context, clips go through command/tool replies.
-- Catalog admission has 18 rules (catalog-submission.md mirrors README). Rule 11: secrets via
-  `agent.secret_scope.get_secret`; rule 14: `requires_hermes` SemVer floor, also in `plugin.yaml`.
+- `developer-guide/plugins/public-api.md` does not exist in v0.23.0. The importable list is `_PUBLIC` in
+  `hermes_cli/plugin_validate_private_imports.py`. We import only `plugins.plugin_storage`,
+  `tools.url_safety:is_safe_url`, `pm` (`ensure_import`, `InstallError`),
+  `gateway.session_context:get_session_env`.
+- `tools.lazy_deps` is gone; lazy installs go through `pm.ensure_import(extra)` (Hermes extras only).
+  Hermes ships `stt-whisper` = `faster-whisper==1.2.1`, so the plugin uses that extra and declares no
+  Python dependencies of its own.
+- `hermes chat` is a gateway client: plugins run in the gateway for every surface (SPIKE.md 1e). So there
+  is no CLI-process watch; the owner pid+start token in the db protects against restarts/other processes.
+- `ctx.post_message` doesn't deliver `MEDIA:`; posts aren't in conversation history; the classic CLI
+  doesn't display posts. → local alerts also queue for `/watching`; a `pre_llm_call` hook gives the agent
+  watch context; clips go through `/wakeme clip` / `wakeme_clip` replies; auto-attach (P1) asks the agent
+  via `inject_message` when the user granted `allow_gateway_injection`.
+- `ctx.session_surface()` returns `"local"` for the classic CLI; slash handlers get `platform="local"`.
+- Catalog admission has 18 rules; the brief's "public-api.md" and catalog rules map to rules 9, 11, 13, 14, 17.
+- streamlink 8.6: `--twitch-disable-ads` is a deprecated no-op; not passed.
 
 ## Decisions
 
 | Decision | Why |
 |---|---|
-| faster-whisper `base`, int8, 4 threads, one shared worker | RTF 0.055 → ~18 streams per model (SPIKE 1b) |
-| Segments `-c:v copy -c:a aac` | Re-encoding cost 33–111 % of a core; copy keeps a watch far below one core |
-| yt-dlp and streamlink: **user-installed CLIs**, detected at runtime with install hints | Not Hermes extras; keeps the plugin's dependency footprint zero; matches "no bundled binaries" |
-| No `python_dependencies`; faster-whisper via `pm.ensure_import("stt-whisper")` | Hermes's own pinned extra; documented public helper |
-| Demo assets generated with edge-tts (generation-time only) | Original synthetic speech, 840 KB for both demos |
-| Watches live in the gateway; db rows still carry owner pid + start token | All surfaces share the gateway; the token guards against stale rows after restarts |
-| Local stub OpenAI server for dev E2E | No keys touched, deterministic, zero LLM spend |
+| faster-whisper `base`, int8, 4 threads, one shared worker | RTF 0.055 → ~18 streams per model (SPIKE 1b); 3 live streams used 24 % of the worker |
+| Segments `-c:v copy -c:a aac` | Re-encoding cost 33–111 % of a core; copy keeps ffmpeg at ~9 % per watch |
+| Demo assets at **10 fps, no B-frames** | ffmpeg `-readrate` (demo `?speed=`) mis-paces 5 fps video when a video output is mapped (62 s instead of 18 s at 4x) |
+| yt-dlp / streamlink as user-installed CLIs, detected with install hints | Not Hermes extras; zero plugin deps; "no bundled binaries" |
+| streamlink in a new **process group of our session** (not a new session) | ffmpeg can't setpgid into another session's group (EPERM) — found on a live Twitch run |
+| Stage A on speech uses speech only; OCR counts only while < 20 s old | A stale OCR hit re-triggered the judge every few seconds (found on LiveNOW FOX) |
+| Trim words repeated across the 2 s window overlap before storing a row | Whisper segment boundaries differ between overlapping windows |
+| Instant reply does no DNS; `is_safe_url` runs on the watcher thread | Brief: no network before the first reply |
+| Plan failure ends the watch (one retry) | Brief; the second message says why |
+| Judge aux task defaults `reasoning_effort: low` | Thinking models; users can set `none` |
+| `requires_hermes: ">=0.23.0"` | Only release tested; older-release fallbacks (`getattr` / `hasattr`) are untested |
+| Dev testing via stub OpenAI server + live harness | No keys touched, deterministic, near-zero LLM spend |
 
 ## Done
 
 - [x] Spike 1a–1f (SPIKE.md). GO.
-- [x] Demo assets + generator (`scripts/make_demo_assets.py`, `assets/demo/`).
+- [x] Demo assets + generator. Skeleton, doctor clean.
+- [x] Full P0 pipeline; dev-CLI E2E on `demo://keynote` (speed 4 and real time): alert 6.5 s after the
+      price, `/wakeme clip` 5.4 min later returns the right moment, catch-up, stop, no ffmpeg left.
+- [x] find on demo, two YouTube VODs (captions) and a NASA MP4 (speech recognition).
+- [x] Live harness: 3 YouTube Live news streams × 13.6 min, 0 false alerts, never `behind`.
+- [x] Tests (63), validate, doctor. README, CHANGELOG, LICENSE, banner. Submission drafts.
+- [x] P1: vision stage (`wakeme_vision`), auto-attach via injection, automation blueprint — code + unit
+      coverage; vision and auto-attach not verified against a real model/gateway.
 
 ## Next
 
-1. Skeleton: manifest, `register(ctx)`, `/wakeme` echo; `hermes plugins doctor` in `.hermes-dev`.
-2. Core pipeline on `demo://keynote` end to end.
-3. find, tests, validate, README, submission drafts.
+1. Live true-positive run (Trump mention on LiveNOW FOX; Twitch sub thanks) → TESTING.md latency budget.
+2. Screenshots from real runs; README image paths.
+3. Telegram E2E once the user connects Telegram and grants permission.

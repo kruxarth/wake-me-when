@@ -132,8 +132,10 @@ class Ingest:
         argv = build_ffmpeg_argv(need("ffmpeg"), self.src, self.workdir, self.frames)
         err = open(self.workdir / "ffmpeg.log", "ab")
         if self.src.pipe_argv:
+            # A new process group in OUR session: setpgid() into a group of another session is EPERM,
+            # so start_new_session here would stop ffmpeg from joining streamlink's group.
             self.pipe = subprocess.Popen(self.src.pipe_argv, stdout=subprocess.PIPE, stderr=err,
-                                         stdin=subprocess.DEVNULL, start_new_session=True)
+                                         stdin=subprocess.DEVNULL, process_group=0)
             self.pgid = self.pipe.pid
             self.proc = subprocess.Popen(argv, stdin=self.pipe.stdout, stdout=subprocess.PIPE, stderr=err,
                                          process_group=self.pgid)

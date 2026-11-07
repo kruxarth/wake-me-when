@@ -56,7 +56,8 @@ def catchup(app: App) -> Callable[..., str]:
 def pre_llm_hook(app: App) -> Callable[..., Any]:
     def hook(session_id: str = "", **kw: Any) -> Any:
         try:
-            ctx_text = app.context_for(session_id=session_id or "", session_key=kw.get("session_key") or "")
+            key = kw.get("session_key") or session_from_kwargs({}).get("session_key", "")
+            ctx_text = app.context_for(session_id=session_id or "", session_key=key)
         except Exception:
             log.debug("wake-me-when: context hook failed", exc_info=True)
             return None
