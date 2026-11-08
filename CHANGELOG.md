@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — 2026-11-09
+## 0.1.0 — 2026-11-08
 
 First release (Nous Research Hermes Agent Plugin Hackathon).
 

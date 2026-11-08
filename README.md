@@ -27,9 +27,9 @@ I'll ping you here.
 Reply “clip”, “not it” or “stop”.
 ```
 
-![A watch, its plan, the alert and the clip](docs/screenshots/alert.png)
+![The bundled demo in a Telegram chat: the watch, its plan, the alert and the clip of the moment](docs/screenshots/demo-keynote.jpg)
 
-*Screenshots are the plugin's verbatim output from dev runs, shown in a chat-style frame.*
+*The chat screenshots are frames from the demo video: the plugin running in a real Telegram chat on Nov 7–8 2026.*
 
 ## 30-second quickstart
 
@@ -62,6 +62,16 @@ Add `?speed=4` to the demo link to run it four times faster. When the alert arri
 **clip**, **not it** or **stop**; `/wakeme list` and `/wakeme catchup` show what's going on. Or just ask
 the agent: *"wake me when the keynote gets to pricing https://youtube.com/…"*.
 
+## On live streams
+
+Counter-Strike on Twitch, *when a team wins a round*: the casters' words, a jump-in link, then the clip.
+
+![An alert from a Counter-Strike match on Twitch, with the casters' quote, a jump-in link and the clip](docs/screenshots/twitch-alert.jpg)
+
+Rainbow Six on YouTube Live, *when a team reaches match point*: the alert came 56 minutes into the watch.
+
+![A match-point alert from a Rainbow Six stream on YouTube Live, 56 minutes into the watch](docs/screenshots/youtube-live-alert.jpg)
+
 ## Examples
 
 | You say | What it listens / looks for |
@@ -77,12 +87,16 @@ the agent: *"wake me when the keynote gets to pricing https://youtube.com/…"*.
 
 ![find in a recording: one model rerank over the captions](docs/screenshots/find.png)
 
+*Verbatim `find` output from a dev run, shown in a chat-style frame.*
+
 "Every time …", "each time …" or "whenever …" keeps watching after the first alert, with a cooldown
 (default 5 min). A recording link with a question ("where…", "what time…", "find…") searches it;
 a live stream, or a condition starting with "when", is watched. `/wakeme find <url> <question>` always
 searches.
 
 ## How it works
+
+![Under the hood: live stream, ffmpeg, speech to text on your machine, free keyword match, a model judge that cites transcript lines, then the alert and clip](docs/screenshots/pipeline.jpg)
 
 ```
              ┌──────────── one ffmpeg per watch (+ streamlink for Twitch) ────────────┐
@@ -123,8 +137,6 @@ searches.
 
 ## Commands
 
-| Command | What it does |
-|---|---|
 Everything is one command, `/wakeme`:
 
 ```
@@ -149,6 +161,10 @@ video, *not it* (or *wrong*, *nope*) resumes the watch and learns from the miss,
 Hermes doesn't let a plugin read chat messages, so the agent handles these: while a chat has watches,
 the plugin adds a short note to your turn naming the watch that just alerted, and the agent calls the
 matching tool. `/wakeme wrong [id] [why]` does the same as *not it* without the agent.
+
+![/wakeme catchup on the Rainbow Six watch: timestamped bullets since the last alert](docs/screenshots/catchup.jpg)
+
+![Replying "not it" to an alert: the miss is logged and the watch keeps going](docs/screenshots/not-it.jpg)
 
 ## Agent tools
 

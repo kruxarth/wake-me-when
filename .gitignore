@@ -1,3 +1,9 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Local working notes: kept on disk, never part of the published plugin
+PROGRESS.md
+SPIKE.md
+HANDOFF*.md
+PLAN*.md

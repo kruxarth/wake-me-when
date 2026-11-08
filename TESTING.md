@@ -4,10 +4,14 @@ Hardware: i7-13620H (10C/16T), 15 GB RAM, no GPU, Arch Linux. Hermes v0.23.0, Py
 ffmpeg 9.0.x, yt-dlp 2026.10.26, streamlink 8.6.3, faster-whisper 1.2.1 (`base`, int8, 4 threads).
 Model for real runs: the maintainer's `deepseek-flash` through Hermes (`hermes chat -Q -q`), Nov 7 2026.
 
+These runs predate the single `/wakeme` command, so they use its earlier names: `/watching` is now
+`/wakeme list` and `/catchup` is now `/wakeme catchup`. The harness scripts and logs cited as `spike/…`
+live in the development workspace, not in this repository.
+
 ## Unit and integration tests
 
 ```bash
-python -m pytest -q tests          # 59 passed (~1.5 min; the e2e tests run real ffmpeg on demo://)
+python -m pytest -q tests          # 93 passed (~1.5 min; the e2e tests run real ffmpeg on demo://)
 hermes plugins doctor . --ci       # OK: 7 tools, 1 hook
 hermes plugins validate . --install-deps   # Validation passed; security scan: safe
 ```
@@ -37,7 +41,7 @@ plan failure, `max_watches` across processes, orphan marking, the Twitch-style p
 | `/catchup 2`, `/wakeme stop 2` | — | ✓; no ffmpeg left (`pgrep -a ffmpeg` empty) |
 
 `/watching` in the classic CLI showed the alert under "Alerts you may have missed" (the classic CLI
-does not display plugin posts; see SPIKE.md 1e).
+does not display plugin posts).
 
 ## Real live streams (harness: real ffmpeg + yt-dlp + faster-whisper, judge = user's model)
 

@@ -1,9 +1,9 @@
-"""Delivery chain: ctx.post_message → ctx.inject_message(session_key) → queue for /watching.
+"""Delivery chain: ctx.post_message → ctx.inject_message(session_key) → queue for /wakeme list.
 
-Measured on Hermes v0.23.0 (SPIKE.md 1e):
+Measured on Hermes v0.23.0:
 * messaging platforms: post_message sends a real message into the chat;
 * TUI / Desktop: a notice; classic CLI: accepted but not displayed, so local alerts are also queued
-  and shown on the next /watching (and offered to the agent through the pre_llm_call hook);
+  and shown on the next /wakeme list (and offered to the agent through the pre_llm_call hook);
 * posts never enter the conversation history and never carry MEDIA: attachments.
 """
 
