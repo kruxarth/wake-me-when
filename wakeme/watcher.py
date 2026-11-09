@@ -283,6 +283,9 @@ class Watch:
                 return "ended", "expired", (f"⏱ Watch #{self.id} expired after {self.s.watch_ttl_hours:g} h "
                                             f"without the moment. /wakeme {self.req.url} when {self.req.condition} "
                                             "to watch again.")
+            refused = self.src.refused()
+            if refused:   # the guard refused a playlist entry or redirect to a private address
+                return "ended", "source: private network", f"❌ Watch #{self.id} stopped: {refused}"[:400]
             self._produce_windows(final=False)
             self._ingest_rows()
             self._collect_judge()
@@ -337,7 +340,8 @@ class Watch:
         try:
             # stream URLs expire; re-resolve (and re-check them)
             fresh = sources.resolve(self.req.url, self.kind, self.s.allow_private_network)
-            self.src.inputs, self.src.pipe_argv = fresh.inputs, fresh.pipe_argv
+            self.src.inputs, self.src.pipe_argv, self.src.whitelist = fresh.inputs, fresh.pipe_argv, fresh.whitelist
+            self.src.ticket = fresh.ticket
         except sources.SourceError as exc:
             return "ended", "stream ended", f"🏁 Watch #{self.id}: the stream ended ({exc})."
         self.ingest.start(base_pos=self.ring.end_pos)

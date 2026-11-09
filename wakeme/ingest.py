@@ -41,7 +41,7 @@ def build_ffmpeg_argv(ffmpeg: str, src: Source, workdir: Path, frames: bool) -> 
     for url in src.inputs:
         if src.paced:
             argv += ["-readrate", f"{src.speed:g}"]
-        if src.kind in {"youtube", "hls", "http"} and src.is_live:
+        if src.kind in {"youtube", "hls", "http"} and src.is_live and src.pipe_argv is None:
             argv += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10"]
         if src.kind == "rtsp":
             argv += ["-rtsp_transport", "tcp"]

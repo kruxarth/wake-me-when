@@ -27,7 +27,7 @@ def _version(argv: list[str]) -> str:
 def check_tools() -> list[tuple[str, str, str]]:
     rows = []
     for name, why, required in (("ffmpeg", "ingest and clips", True), ("ffprobe", "media probing", True),
-                                ("yt-dlp", "YouTube", False), ("streamlink", "Twitch", False),
+                                ("yt-dlp", "YouTube", False), ("streamlink", "Twitch, HLS and web media", False),
                                 ("tesseract", "on-screen text", False)):
         path = sources.which(name)
         if path:

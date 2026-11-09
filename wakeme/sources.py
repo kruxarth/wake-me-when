@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import http.client
+import ipaddress
 import json
 import os
 import re
@@ -29,7 +31,8 @@ INSTALL_HINTS = {
     "ffmpeg": "install ffmpeg with your package manager (e.g. `sudo apt install ffmpeg`, `brew install ffmpeg`, `sudo pacman -S ffmpeg`)",
     "ffprobe": "ffprobe ships with ffmpeg (install ffmpeg)",
     "yt-dlp": "`uv tool install yt-dlp` (or `pipx install yt-dlp`) — needed for YouTube and most video sites",
-    "streamlink": "`uv tool install streamlink` (or `pipx install streamlink`) — needed for Twitch",
+    "streamlink": "`uv tool install streamlink` (or `pipx install streamlink`) — needed for Twitch and for "
+                  "direct HLS and web-media links",
     "tesseract": "install tesseract for on-screen text (e.g. `sudo apt install tesseract-ocr`, `brew install tesseract`)",
     "deno": "optional: install Deno (https://deno.com) so yt-dlp can read every YouTube format; node or bun also work",
 }
@@ -49,11 +52,23 @@ TOOL_ENV_KEYS = frozenset({
     "TESSDATA_PREFIX",                                      # where tesseract's language data is
 })
 TOOL_ENV_PREFIXES = ("LC_", "XDG_")
+PROXY_ENV_KEYS = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
 
 
 def tool_env() -> dict[str, str]:
     """Environment for every external tool the plugin starts: an allowlist, never the Hermes one."""
     return {k: v for k, v in os.environ.items() if k in TOOL_ENV_KEYS or k.startswith(TOOL_ENV_PREFIXES)}
+
+
+def proxy_configured() -> bool:
+    """The user routes traffic through their own proxy, which then resolves names (Hermes's policy too)."""
+    return any(os.environ.get(k) for k in PROXY_ENV_KEYS)
+
+
+def guarded(allow_private: bool) -> bool:
+    """Whether direct HLS and web-media links are fetched by streamlink through the network guard
+    (``guard.py``) instead of by ffmpeg: always, unless private networks are allowed or a proxy is set."""
+    return not allow_private and not proxy_configured()
 
 
 def which(name: str) -> Optional[str]:
@@ -91,6 +106,11 @@ class Source:
     captions: Optional[list] = None                   # vtt.Cue list (demo / sidecar)
     duration: Optional[float] = None
     video_id: str = ""                                # YouTube id for &t= links
+    ticket: Optional[object] = None                   # guard.Ticket when streamlink fetches through the guard
+
+    def refused(self) -> Optional[str]:
+        """Why the guard refused part of this stream (a private address), if it did."""
+        return self.ticket.reason() if self.ticket is not None else None
 
     @property
     def paced(self) -> bool:
@@ -156,9 +176,15 @@ def classify(url: str) -> str:
 def _is_safe_http(url: str) -> bool:
     try:
         from tools.url_safety import is_safe_url
-    except ImportError:  # outside Hermes (tests): conservative literal check only
+    except ImportError:  # outside Hermes (tests): a check of literal addresses only, no DNS
         host = (urlparse(url).hostname or "").lower()
-        return not (host in {"localhost", ""} or host.startswith(("127.", "10.", "192.168.", "169.254.")))
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            return host not in {"localhost", ""} and not host.endswith(".localhost")
+        ip = ip.ipv4_mapped or ip if isinstance(ip, ipaddress.IPv6Address) else ip
+        return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast
+                    or ip.is_unspecified or ip in ipaddress.ip_network("100.64.0.0/10"))
     return is_safe_url(url)
 
 
@@ -314,9 +340,10 @@ def looks_recorded(url: str) -> bool:
             or (kind == "youtube" and "/live" not in path) or (kind == "http" and bool(_MEDIA_EXT.search(path))))
 
 
-def is_recording(url: str, kind: str) -> bool:
+def is_recording(url: str, kind: str, allow_private: bool = False) -> bool:
     """Whether a checked link is a recording to search rather than a stream to watch (``demo://`` is a
-    stream). May touch the network (yt-dlp metadata, ffprobe), so only for a question-shaped request."""
+    stream). May touch the network (yt-dlp metadata, ffprobe, the guard's playlist read), so only for a
+    question-shaped request."""
     if kind in {"demo", "rtsp"}:
         return False
     if kind == "file":
@@ -328,12 +355,45 @@ def is_recording(url: str, kind: str) -> bool:
             return False
         info = ytdlp_info(url, fmt=None, timeout=45)
         return not info.get("is_live") and info.get("live_status") != "is_upcoming"
+    if guarded(allow_private):
+        return not _guarded_probe(url, kind).live
     return probe_duration(url, NET_WHITELIST) is not None
+
+
+def _guarded_probe(url: str, kind: str):
+    from . import guard
+    try:
+        return guard.probe(url, kind)
+    except guard.Blocked as exc:
+        raise SourceError(f"That link leads to a private or local network address ({exc}), so it isn't opened. "
+                          "Enable the `allow_private_network` setting to allow it.") from exc
+    except (OSError, http.client.HTTPException) as exc:
+        raise SourceError(f"Couldn't open that link: {exc or exc.__class__.__name__}") from exc
+
+
+def _guarded_direct(url: str, kind: str) -> Source:
+    """A direct HLS / web-media link read by streamlink through the guard and piped into ffmpeg, so every
+    playlist entry, key and redirect gets the private-network check (ffmpeg can't check its own fetches).
+    Whether it is a VOD comes from the playlist (``#EXT-X-ENDLIST``) or a sized body, not from ffprobe."""
+    from . import guard
+    sl = need("streamlink")
+    pr = _guarded_probe(url, kind)
+    if pr.index_at_end:
+        raise SourceError("That MP4 keeps its index at the end of the file, so it can't be read as a stream. "
+                          "Download it and use the local file (or re-save it with `ffmpeg -movflags +faststart`).")
+    ticket = guard.get().ticket()
+    target = ("hls://" if pr.hls else "httpstream://") + url
+    return Source(url=url, kind=kind, title=unquote(Path(urlparse(url).path).name) or url, is_live=pr.live,
+                  inputs=["pipe:0"], whitelist=PIPE_WHITELIST, duration=pr.duration, ticket=ticket,
+                  pipe_argv=[sl, "--no-config", "-O", "--loglevel", "warning", "--http-proxy", ticket.proxy_url,
+                             "--", target, "480p,best"])
 
 
 def resolve(url: str, kind: str, allow_private: bool = False) -> Source:
     """Network-touching resolution. Runs on the watcher thread, never in a command handler. The stream
-    URLs yt-dlp and streamlink report are checked like the link itself unless ``allow_private``."""
+    URLs yt-dlp and streamlink report are checked like the link itself unless ``allow_private``; direct
+    HLS and web-media links are fetched through the guard (every connection checked) unless
+    ``allow_private`` or a user proxy is set."""
     need("ffmpeg")
     if kind == "demo":
         return _demo(url)
@@ -372,6 +432,8 @@ def resolve(url: str, kind: str, allow_private: bool = False) -> Source:
         return Source(url=url, kind="rtsp", title=urlparse(url).hostname or url, is_live=True, inputs=[url],
                       whitelist=RTSP_WHITELIST)
     # hls / http: direct media. A finite duration means a VOD that we play in real time.
+    if guarded(allow_private):
+        return _guarded_direct(url, kind)
     dur = probe_duration(url, NET_WHITELIST)
     return Source(url=url, kind=kind, title=unquote(Path(urlparse(url).path).name) or url, is_live=dur is None,
                   inputs=[url], whitelist=NET_WHITELIST, duration=dur)

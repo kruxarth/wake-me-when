@@ -11,7 +11,7 @@ live in the development workspace, not in this repository.
 ## Unit and integration tests
 
 ```bash
-python -m pytest -q tests          # 107 passed (~1.5 min; the e2e tests run real ffmpeg on demo://)
+python -m pytest -q tests          # 122 passed (~2 min; the e2e tests run real ffmpeg on demo://)
 hermes plugins doctor . --ci       # OK: 7 tools, 1 hook
 hermes plugins validate . --install-deps   # Validation passed; security scan: safe
 ```
@@ -23,12 +23,44 @@ quote fallback, transcript windowing and overlap trimming, VTT/SRT/YouTube rolli
 ring and bounded ASR queue, clip cutting after the ring rotated past the moment, URL safety (`--`
 before URLs for yt-dlp/streamlink, per-source ffmpeg `-protocol_whitelist`, no file+network mixing,
 local paths refused from messaging chats, symlink escape, private addresses, the private-address check
-on stream URLs yt-dlp and streamlink resolve, exact YouTube/Twitch host matching), the minimal tool
+on stream URLs yt-dlp and streamlink resolve, exact YouTube/Twitch host matching, the network guard for
+direct HLS and web-media links), the minimal tool
 environment (every `subprocess` call passes `env=tool_env()`; fake tools show planted keys never arrive), an end-to-end
 `demo://keynote?speed=4` watch with a stubbed LLM (alert, clip, catch-up, hook context, auto-attach
 request, stop, no ffmpeg left), not-it feedback reaching the judge, LLM outage → unconfirmed alerts,
 plan failure, `max_watches` across processes, orphan marking, the Twitch-style pipe process group, and
 `register(ctx)` against a fake ctx matching the manifest.
+
+## Network guard for direct HLS and web-media links (0.1.2, Nov 9)
+
+`tests/test_guard.py` uses local HTTP servers: 127.0.0.1 is the public host and 127.0.0.2 the LAN host
+(the address check is patched to refuse only 127.0.0.2), with real streamlink 8.6.3 and ffmpeg 9.0.2.
+
+| Case | Result |
+|---|---|
+| control: ffmpeg given the public playlist URL itself | fetches the LAN segment (the gap 0.1.1 disclosed) |
+| public playlist whose segment / AES key is on the LAN host | refused by the guard; the LAN server sees no request |
+| public master playlist whose variant is on the LAN host | refused while the plugin reads the playlist, before streamlink starts |
+| playlist that redirects (302) to the LAN host | refused by the plugin's own playlist read |
+| public segment that redirects to the LAN host | streamlink follows it through the guard, which refuses it |
+| server that answers safely first and redirects to the LAN later | the later fetch is refused (each connection is checked when it is made) |
+| DNS answer with one public and one private address | refused; a public-only answer is dialled at the checked address |
+| proxy request without credentials, with wrong ones, or with a released ticket | `407` |
+| same-host 6 s VOD playlist | plays through `Ingest`: 6 s of audio read in real time; VOD and duration come from `#EXT-X-ENDLIST` |
+| find on that VOD | 6 s of 16 kHz PCM through the pipe |
+| MP4 with `moov` after `mdat` | clear "index at the end" reason; a faststart MP4 opens through `httpstream://` |
+| watch on a playlist with LAN segments | stops with "❌ Watch #1 stopped: the stream asked for an address on a private or local network…" |
+| `allow_private_network` on, or `HTTPS_PROXY` set | ffmpeg reads the link directly, as before |
+
+Live, with Hermes's own `tools.url_safety` (`spike/live10.log`, `spike/find_guard.log`):
+
+- `https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8`: a VOD (634.6 s, from the playlist) played through
+  streamlink and the guard at real time. A 3-minute watch with the real model and faster-whisper posted the
+  plan card, transcribed the stream's few words, ran a judge check and a catch-up, refused nothing,
+  and left no ffmpeg or streamlink after stop (plugin 22 % of a core on average, ffmpeg and streamlink 20 %).
+- find on the same VOD read and searched all 10.5 minutes in 23.7 s (no matching moment for the question).
+- find on the NASA Artemis I MP4 (below) through `httpstream://`: the same answer as before,
+  **1:33** "…barreling its way back home…", 12.9 s in total.
 
 ## Dev-CLI end to end (isolated `HERMES_HOME`, stub model)
 

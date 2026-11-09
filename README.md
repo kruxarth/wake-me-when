@@ -34,8 +34,8 @@ Reply “clip”, “not it” or “stop”.
 ## 30-second quickstart
 
 **Prerequisites:** Hermes ≥ 0.23.0 and `ffmpeg` on your PATH. For YouTube add
-[`yt-dlp`](https://github.com/yt-dlp/yt-dlp), for Twitch [`streamlink`](https://streamlink.github.io),
-for on-screen text `tesseract` (all optional):
+[`yt-dlp`](https://github.com/yt-dlp/yt-dlp), for Twitch and direct HLS or web-media links
+[`streamlink`](https://streamlink.github.io), for on-screen text `tesseract` (all optional):
 
 ```bash
 uv tool install yt-dlp && uv tool install streamlink
@@ -99,7 +99,7 @@ searches.
 ![Under the hood: live stream, ffmpeg, speech to text on your machine, free keyword match, a model judge that cites transcript lines, then the alert and clip](docs/screenshots/pipeline.jpg)
 
 ```
-             ┌──────────── one ffmpeg per watch (+ streamlink for Twitch) ────────────┐
+             ┌──── one ffmpeg per watch (+ streamlink for Twitch, HLS, web media) ────┐
  stream ───► │ 16 kHz PCM ─► reader thread ─► audio ring (drops oldest, never blocks)  │
              │ keyframes every 2 s (only if the plan needs visuals)                   │
              │ 5 s segments, stream copy ─► ~3 min ring (clips)                       │
@@ -194,7 +194,7 @@ Desktop Plugins tab.
 | `catchup_summary_min` | `10` | minutes per rolling summary |
 | `keep_transcripts_days` | `7` | transcripts and summaries |
 | `keep_clips_days` | `2` | clips you asked for |
-| `allow_private_network` | `false` | allow LAN addresses (local RTSP cameras) |
+| `allow_private_network` | `false` | allow LAN addresses (local RTSP cameras); also lets ffmpeg fetch direct HLS and web-media links itself, unchecked |
 | `allowed_media_dirs` | `[]` | folders whose files may be watched from messaging chats |
 
 Route the judge to a cheap/fast model with `hermes model` → *Configure auxiliary models* →
@@ -256,6 +256,10 @@ Measured on Nov 7 2026 ([TESTING.md](TESTING.md) has the breakdown):
 - *YouTube: "Sign in to confirm you're not a bot" / 429*: wait a few minutes or use another source.
   Installing Deno (or having node/bun) helps yt-dlp read every format.
 - *Twitch: "offline"*: the channel isn't live; `streamlink --json twitch.tv/<name>` confirms.
+- *Web media: "keeps its index at the end"*: that MP4 can't be read as it downloads (its index comes
+  after the video). Download it and watch the local file.
+- *"the stream asked for an address on a private or local network"*: a playlist entry or redirect of
+  that link pointed at your LAN, and the network guard refused it (see Disclosure).
 
 ## Disclosure
 
@@ -271,10 +275,22 @@ Measured on Nov 7 2026 ([TESTING.md](TESTING.md) has the breakdown):
   bot tokens never reach them.
 - **Private networks:** a link that points at a private or local address is refused unless
   `allow_private_network` is on, and so is a stream URL that yt-dlp or streamlink resolves it to. Only
-  `youtube.com`, `youtu.be` and `twitch.tv` (and their subdomains) go to yt-dlp and streamlink. Not
-  covered: for a direct HLS or media link, ffmpeg itself fetches the playlist's entries and follows
-  redirects, and those hops aren't checked (ffmpeg has no per-request hook).
-- **Long-running processes:** one `ffmpeg` per active watch (plus one `streamlink` for Twitch), in
+  `youtube.com`, `youtu.be` and `twitch.tv` (and their subdomains) go to yt-dlp and streamlink. A
+  direct HLS or web-media link is fetched by `streamlink` through the plugin's network guard, and
+  ffmpeg only reads streamlink's output from a pipe (`-protocol_whitelist pipe`). The guard checks
+  every connection streamlink makes, including playlist variants, segments, keys and redirects: it
+  resolves the host, refuses it if any address fails Hermes's `is_safe_url`, and connects to the
+  address it checked. The plugin reads the playlist itself the same way to tell a VOD
+  (`#EXT-X-ENDLIST`) from a live stream. Not covered: with `allow_private_network` on, or when you set
+  your own HTTP(S) proxy (the proxy then resolves names, as in Hermes's own policy), ffmpeg fetches
+  these links itself; and for YouTube, ffmpeg fetches the segments of the stream URLs yt-dlp returns
+  (those URLs are checked, the hosts are YouTube's).
+- **Loopback listener:** the network guard is an HTTP proxy on `127.0.0.1` with a random port,
+  started the first time a direct HLS or web-media link is opened and closed when the plugin unloads.
+  It only accepts requests carrying the random credentials of a source that is open right now, and
+  only connects to public addresses.
+- **Long-running processes:** one `ffmpeg` per active watch (plus one `streamlink` for Twitch, HLS and
+  web-media links), in
   their own process group, killed on stop, plugin unload and gateway exit; one shared
   speech-recognition worker thread.
 - **Local files:** accepted only from the Hermes CLI/TUI/Desktop or from folders you list in

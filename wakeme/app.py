@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from . import asr, config, notify, plan as planmod, sources, vod
+from . import asr, config, guard, notify, plan as planmod, sources, vod
 from .store import OWNER_TOKEN, Store, owner_alive
 from .watcher import Manager
 
@@ -70,7 +70,7 @@ class App:
             try:
                 kind = sources.check_url(req.url, surface=session.get("platform", ""),
                                          allow_private=s.allow_private_network, allowed_dirs=s.allowed_media_dirs)
-                recording = sources.is_recording(req.url, kind)
+                recording = sources.is_recording(req.url, kind, s.allow_private_network)
             except sources.SourceError as exc:
                 return f"❌ {exc}"
             if recording:
@@ -247,4 +247,5 @@ class App:
             self.mgr.stop_all(reason="plugin unloaded", wait=5)
         finally:
             kill_all()
+            guard.shutdown()
             asr.WORKER.stop()

@@ -149,18 +149,31 @@ def _youtube_captions(url: str, workdir: Path) -> tuple[dict, list[vtt.Cue]]:
     return info, vtt.parse(Path(files[0]).read_text(encoding="utf-8", errors="replace"))
 
 
-def _asr_media(target: str, whitelist: str, language: Optional[str], pre: list[str] = ()) -> list[vtt.Cue]:
+def _asr_media(target: str, whitelist: str, language: Optional[str], pre: list[str] = (),
+               pipe_argv: Optional[list[str]] = None) -> list[vtt.Cue]:
+    """Speech recognition over a media URL or file, or over what ``pipe_argv`` (the guarded streamlink)
+    writes to ffmpeg's stdin."""
     if not asr.ready():
         ok, msg = asr.load_model()
         if not ok:
             raise FindError(f"No captions, and local speech recognition isn't available: {msg}")
-    argv = [sources.need("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin", *pre,
-            "-protocol_whitelist", whitelist, "-i", target, "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le",
+    argv = [sources.need("ffmpeg"), "-hide_banner", "-loglevel", "error", *([] if pipe_argv else ["-nostdin"]),
+            *pre, "-protocol_whitelist", whitelist, "-i", target, "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le",
             "-t", str(MAX_ASR_SECONDS), "pipe:1"]
+    feeder = None
     try:
-        p = subprocess.run(argv, capture_output=True, timeout=900, stdin=subprocess.DEVNULL, env=sources.tool_env())
+        if pipe_argv:
+            feeder = subprocess.Popen(pipe_argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                      stdin=subprocess.DEVNULL, start_new_session=True, env=sources.tool_env())
+        p = subprocess.run(argv, capture_output=True, timeout=900, env=sources.tool_env(),
+                           stdin=feeder.stdout if feeder else subprocess.DEVNULL)
     except subprocess.TimeoutExpired as exc:
         raise FindError("Reading the audio took too long.") from exc
+    finally:
+        if feeder is not None:
+            feeder.stdout.close()
+            feeder.kill()
+            feeder.wait()
     if p.returncode != 0 or not p.stdout:
         raise FindError("Couldn't read audio from that source.")
     return [vtt.Cue(s.start, s.end, s.text) for s in asr.transcribe_file_pcm(p.stdout, language)]
@@ -213,7 +226,15 @@ def transcript_for(url: str, kind: str, language: Optional[str],
             return src, src.captions, "captions"
         if src.duration and src.duration > MAX_ASR_SECONDS:
             raise FindError("That recording is longer than 3 hours; add a .vtt/.srt next to it to search it.")
-        return src, _asr_media(src.inputs[0], src.whitelist, language), "speech recognition"
+        try:
+            found = _asr_media(src.inputs[0], src.whitelist, language, pipe_argv=src.pipe_argv)
+        except FindError:
+            if src.refused():
+                raise FindError(src.refused()) from None
+            raise
+        if src.refused():   # part of the recording was refused: don't search what's left of it
+            raise FindError(src.refused())
+        return src, found, "speech recognition"
 
 
 def rank(passages: list[Passage], question: str,

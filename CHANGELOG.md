@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.2 — 2026-11-09
+
+Closes the gap 0.1.1 disclosed: on direct HLS and web-media links, ffmpeg's own fetches weren't checked.
+
+- Direct HLS and web-media links are fetched by `streamlink` through a network guard and piped into
+  ffmpeg (`-protocol_whitelist pipe`), the way Twitch already worked. The guard is an HTTP proxy on
+  `127.0.0.1` (random port, per-source random credentials). For every connection, including
+  playlist variants, segments, AES keys and redirects, it resolves the host, refuses it if any
+  address fails Hermes's `is_safe_url`, and dials the address it checked, so a playlist can't point
+  ffmpeg at a LAN host and a DNS answer can't change between check and connect. A watch whose stream
+  asks for a private address stops and says so; find mode refuses that recording.
+- VOD or live comes from the playlist (`#EXT-X-ENDLIST`, summed `#EXTINF` durations) or a sized
+  body, read through the same checks, instead of ffprobe on the URL.
+- `streamlink` is now needed for these links unless `allow_private_network` is on or you set your
+  own HTTP(S) proxy (then ffmpeg fetches them as before, and the proxy resolves names). Without it,
+  the link is refused rather than opened unchecked.
+- An MP4 whose index sits at the end of the file can't be streamed through a pipe; it now gets a
+  clear reason (download it and watch the file) instead of an ffmpeg error.
+- Tests with local servers: a public playlist's LAN segment, key or variant, a cross-host redirect
+  to a LAN host and a mixed public/private DNS answer are refused; a same-host playlist plays and is
+  searchable; the proxy needs a live ticket; a control test shows ffmpeg alone fetches the LAN entry.
+
 ## 0.1.1 — 2026-11-09
 
 Catalog review fixes.
