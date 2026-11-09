@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.1 — 2026-11-09
+
+Catalog review fixes.
+
+- External tools (ffmpeg, ffprobe, yt-dlp, streamlink, tesseract) run with a minimal environment
+  instead of the Hermes one: `PATH`, `HOME`, `TMPDIR`, `LANG`/`LC_*`, `XDG_*`, plus the proxy
+  variables, CA-bundle paths (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`) and
+  `TESSDATA_PREFIX` when they are set. Provider keys and bot tokens no longer reach them. A test
+  fails if any subprocess call in the plugin leaves out `env=`.
+- The stream URLs yt-dlp and streamlink resolve a link to get the same private-network check as the
+  link itself, for watches, the re-resolve after a stream URL expires, and find mode's audio URL.
+- Only `youtube.com`, `youtu.be` and `twitch.tv` and their subdomains count as YouTube and Twitch
+  links. A lookalike host (`notyoutube.com`) is now a plain web link, so it never reaches yt-dlp's
+  generic extractor.
+
 ## 0.1.0 — 2026-11-08
 
 First release (Nous Research Hermes Agent Plugin Hackathon).

@@ -11,6 +11,8 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from .sources import tool_env
+
 Seg = tuple[str, float, float]   # (path, start_pos, end_pos)
 
 
@@ -66,7 +68,7 @@ def cut(ffmpeg: str, segs: list[Seg], start: float, duration: float, out: Path) 
             "-map", "0:v:0?", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(out)]
     try:
-        p = subprocess.run(argv, capture_output=True, timeout=120, stdin=subprocess.DEVNULL)
+        p = subprocess.run(argv, capture_output=True, timeout=120, stdin=subprocess.DEVNULL, env=tool_env())
     except subprocess.TimeoutExpired:
         return None
     finally:

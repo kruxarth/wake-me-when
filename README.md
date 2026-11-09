@@ -266,7 +266,14 @@ Measured on Nov 7 2026 ([TESTING.md](TESTING.md) has the breakdown):
   a JavaScript runtime (Deno, node or bun) that yt-dlp may use for YouTube. None are bundled; all are
   detected at runtime. Every subprocess uses an argv list (never a shell), `--` before user URLs, and
   an explicit ffmpeg `-protocol_whitelist` per source type (network and `file` protocols are never
-  mixed).
+  mixed). They run with a minimal environment, not Hermes's: `PATH`, `HOME`, `TMPDIR`, `LANG`/`LC_*`,
+  `XDG_*`, and when set the proxy variables, CA-bundle paths and `TESSDATA_PREFIX`. Provider keys and
+  bot tokens never reach them.
+- **Private networks:** a link that points at a private or local address is refused unless
+  `allow_private_network` is on, and so is a stream URL that yt-dlp or streamlink resolves it to. Only
+  `youtube.com`, `youtu.be` and `twitch.tv` (and their subdomains) go to yt-dlp and streamlink. Not
+  covered: for a direct HLS or media link, ffmpeg itself fetches the playlist's entries and follows
+  redirects, and those hops aren't checked (ffmpeg has no per-request hook).
 - **Long-running processes:** one `ffmpeg` per active watch (plus one `streamlink` for Twitch), in
   their own process group, killed on stop, plugin unload and gateway exit; one shared
   speech-recognition worker thread.

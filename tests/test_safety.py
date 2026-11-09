@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 import pytest
@@ -118,3 +119,42 @@ def test_links_only_seek_on_vods():
     vod = Source(url="https://youtu.be/abc", kind="youtube", is_live=False, video_id="abc")
     assert live.link(125) == live.url
     assert vod.link(125) == "https://www.youtube.com/watch?v=abc&t=122s"
+
+
+@pytest.mark.parametrize("url,kind", [
+    ("https://www.youtube.com/watch?v=x", "youtube"), ("https://youtu.be/x", "youtube"),
+    ("https://m.youtube.com/@NASA/live", "youtube"), ("https://www.twitch.tv/x", "twitch"),
+    ("https://notyoutube.com/watch?v=x", "http"), ("https://youtube.com.evil.test/x", "http"),
+    ("https://eviltwitch.tv/x.m3u8", "hls"), ("https://twitch.tv.evil.test/x", "http"),
+])
+def test_only_youtube_and_twitch_hosts_reach_their_resolvers(url, kind):
+    assert sources.classify(url) == kind      # a lookalike host never reaches yt-dlp's generic extractor
+
+
+def test_stream_urls_from_resolvers_get_the_private_network_check(monkeypatch):
+    monkeypatch.setattr(sources, "need", lambda name: name)
+    monkeypatch.setattr(sources, "_is_safe_http", lambda url: "10.0.0.5" not in url)
+    yt = {"is_live": True, "requested_formats": [{"url": "https://r1.googlevideo.test/v", "vcodec": "avc1"},
+                                                 {"url": "http://10.0.0.5/a", "vcodec": "none"}]}
+    monkeypatch.setattr(sources, "ytdlp_info", lambda url, **kw: yt)
+    with pytest.raises(SourceError, match="yt-dlp resolved that link to a private"):
+        sources.resolve("https://www.youtube.com/watch?v=x", "youtube")
+    assert len(sources.resolve("https://www.youtube.com/watch?v=x", "youtube", allow_private=True).inputs) == 2
+    yt["requested_formats"][1]["url"] = "https://r1.googlevideo.test/a"
+    assert sources.resolve("https://www.youtube.com/watch?v=x", "youtube").inputs[1].endswith("/a")
+
+    twitch = {"streams": {"best": {"type": "hls", "url": "https://p.ttvnw.test/v1/playlist/x.m3u8",
+                                   "master": "http://10.0.0.5/api/channel/hls/x.m3u8"}}, "metadata": {}}
+    monkeypatch.setattr(sources, "_run", lambda argv, timeout: subprocess.CompletedProcess(
+        argv, 0, stdout=json.dumps(twitch), stderr=""))
+    with pytest.raises(SourceError, match="streamlink resolved"):
+        sources.resolve("https://www.twitch.tv/x", "twitch")
+    assert sources.resolve("https://www.twitch.tv/x", "twitch", allow_private=True).pipe_argv
+
+
+def test_find_checks_the_audio_url_from_yt_dlp(monkeypatch, tmp_path):
+    from wake_me_when.wakeme import vod
+    monkeypatch.setattr(sources, "_is_safe_http", lambda url: "192.168." not in url)
+    monkeypatch.setattr(sources, "ytdlp_info", lambda url, **kw: {"requested_formats": [{"url": "http://192.168.1.9/a"}]})
+    with pytest.raises(vod.FindError, match="yt-dlp resolved that link to a private"):
+        vod._youtube_audio_asr("https://youtu.be/x", {"duration": 60}, tmp_path, None)

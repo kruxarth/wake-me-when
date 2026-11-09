@@ -39,6 +39,23 @@ class SourceError(Exception):
     """A user-facing reason the source can't be watched."""
 
 
+# The only environment the external tools (ffmpeg, ffprobe, yt-dlp, streamlink, tesseract) get. The
+# Hermes process holds provider keys and bot tokens; a tool sees where programs, home, temp and config
+# directories are, the locale, and the user's proxy and CA-bundle settings when they are set.
+TOOL_ENV_KEYS = frozenset({
+    "PATH", "HOME", "TMPDIR", "LANG",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",  # a proxy that re-signs TLS needs its CA
+    "TESSDATA_PREFIX",                                      # where tesseract's language data is
+})
+TOOL_ENV_PREFIXES = ("LC_", "XDG_")
+
+
+def tool_env() -> dict[str, str]:
+    """Environment for every external tool the plugin starts: an allowlist, never the Hermes one."""
+    return {k: v for k, v in os.environ.items() if k in TOOL_ENV_KEYS or k.startswith(TOOL_ENV_PREFIXES)}
+
+
 def which(name: str) -> Optional[str]:
     return shutil.which(name)
 
@@ -109,6 +126,11 @@ def fmt_pos(seconds: float) -> str:
 
 # ---- classification & safety ----------------------------------------------------------------
 
+def _host_in(host: str, *domains: str) -> bool:
+    """``host`` is one of ``domains`` or a subdomain of one (``notyoutube.com`` is not youtube.com)."""
+    return any(host == d or host.endswith("." + d) for d in domains)
+
+
 def classify(url: str) -> str:
     u = url.strip()
     if u.startswith("demo://"):
@@ -122,9 +144,9 @@ def classify(url: str) -> str:
     if scheme not in {"http", "https"}:
         return "unsupported"
     host = (p.hostname or "").lower()
-    if host.endswith(("youtube.com", "youtu.be")):
+    if _host_in(host, "youtube.com", "youtu.be"):
         return "youtube"
-    if host.endswith("twitch.tv"):
+    if _host_in(host, "twitch.tv"):
         return "twitch"
     if p.path.lower().endswith(".m3u8"):
         return "hls"
@@ -188,11 +210,27 @@ def check_url(url: str, *, surface: str, allow_private: bool = False, allowed_di
     return kind
 
 
+def check_resolved(urls: list[str], via: str, allow_private: bool) -> None:
+    """Stream URLs a resolver (yt-dlp, streamlink) hands back get the same check as the user's link, so
+    a public page can't resolve to an address on the LAN."""
+    if allow_private:
+        return
+    hosts = {}
+    for u in urls:
+        p = urlparse(u)
+        hosts.setdefault((p.scheme, p.netloc), u)   # one DNS check per host
+    for u in hosts.values():
+        if not _is_safe_http(u):
+            raise SourceError(f"{via} resolved that link to a private or local network address, so it isn't "
+                              "opened. Enable the `allow_private_network` setting to allow it.")
+
+
 # ---- resolution -----------------------------------------------------------------------------
 
 def _run(argv: list[str], timeout: float) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL,
+                              env=tool_env())
     except subprocess.TimeoutExpired as exc:
         raise SourceError(f"{Path(argv[0]).name} timed out after {int(timeout)} s") from exc
 
@@ -259,7 +297,7 @@ def probe_duration(target: str, whitelist: str) -> Optional[float]:
     try:
         p = subprocess.run([which("ffprobe"), "-v", "error", "-protocol_whitelist", whitelist,
                             "-show_entries", "format=duration", "-of", "csv=p=0", "-i", target],
-                           capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+                           capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL, env=tool_env())
         return float(p.stdout.strip())
     except (subprocess.TimeoutExpired, ValueError, TypeError):
         return None
@@ -293,8 +331,9 @@ def is_recording(url: str, kind: str) -> bool:
     return probe_duration(url, NET_WHITELIST) is not None
 
 
-def resolve(url: str, kind: str) -> Source:
-    """Network-touching resolution. Runs on the watcher thread, never in a command handler."""
+def resolve(url: str, kind: str, allow_private: bool = False) -> Source:
+    """Network-touching resolution. Runs on the watcher thread, never in a command handler. The stream
+    URLs yt-dlp and streamlink report are checked like the link itself unless ``allow_private``."""
     need("ffmpeg")
     if kind == "demo":
         return _demo(url)
@@ -306,6 +345,7 @@ def resolve(url: str, kind: str) -> Source:
         inputs = [f["url"] for f in fmts if f.get("url")]
         if not inputs:
             raise SourceError("yt-dlp found no playable stream")
+        check_resolved(inputs, "yt-dlp", allow_private)
         if len(fmts) == 2 and fmts[0].get("vcodec") == "none":  # keep (video, audio) order
             inputs.reverse()
         return Source(url=url, kind="youtube", title=info.get("title") or url,
@@ -321,6 +361,9 @@ def resolve(url: str, kind: str) -> Source:
             meta = {}
         if not meta.get("streams"):
             raise SourceError(meta.get("error") or "That Twitch channel is offline (no streams).")
+        check_resolved([u for s in meta["streams"].values() if isinstance(s, dict)
+                        for u in (s.get("url"), s.get("master")) if isinstance(u, str) and u],
+                       "streamlink", allow_private)
         md = meta.get("metadata") or {}
         return Source(url=url, kind="twitch", title=md.get("title") or url, channel=md.get("author") or "",
                       is_live="/videos/" not in url, inputs=["pipe:0"], whitelist=PIPE_WHITELIST,

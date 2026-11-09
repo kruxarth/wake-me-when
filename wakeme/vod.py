@@ -137,7 +137,8 @@ def _youtube_captions(url: str, workdir: Path) -> tuple[dict, list[vtt.Cue]]:
             "--write-subs", "--write-auto-subs", "--sub-langs", "en.*,en,-live_chat", "--sub-format", "vtt",
             "-o", str(workdir / "%(id)s.%(ext)s"), "--", url]
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=90, stdin=subprocess.DEVNULL)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=90, stdin=subprocess.DEVNULL,
+                           env=sources.tool_env())
     except subprocess.TimeoutExpired:
         return info, []
     files = sorted(glob.glob(str(workdir / "*.vtt")), key=lambda f: ("orig" in f, len(f)))
@@ -157,7 +158,7 @@ def _asr_media(target: str, whitelist: str, language: Optional[str], pre: list[s
             "-protocol_whitelist", whitelist, "-i", target, "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le",
             "-t", str(MAX_ASR_SECONDS), "pipe:1"]
     try:
-        p = subprocess.run(argv, capture_output=True, timeout=900, stdin=subprocess.DEVNULL)
+        p = subprocess.run(argv, capture_output=True, timeout=900, stdin=subprocess.DEVNULL, env=sources.tool_env())
     except subprocess.TimeoutExpired as exc:
         raise FindError("Reading the audio took too long.") from exc
     if p.returncode != 0 or not p.stdout:
@@ -165,17 +166,23 @@ def _asr_media(target: str, whitelist: str, language: Optional[str], pre: list[s
     return [vtt.Cue(s.start, s.end, s.text) for s in asr.transcribe_file_pcm(p.stdout, language)]
 
 
-def _youtube_audio_asr(url: str, info: dict, workdir: Path, language: Optional[str]) -> list[vtt.Cue]:
+def _youtube_audio_asr(url: str, info: dict, workdir: Path, language: Optional[str],
+                      allow_private: bool = False) -> list[vtt.Cue]:
     if (info.get("duration") or 0) > MAX_ASR_SECONDS:
         raise FindError("No captions, and the video is too long to transcribe locally (3 h max).")
     fmts = sources.ytdlp_info(url, fmt="ba/b").get("requested_formats") or []
     audio_url = (fmts[0] if fmts else {}).get("url") or sources.ytdlp_info(url, fmt="ba/b").get("url")
     if not audio_url:
         raise FindError("YouTube gave no audio stream.")
+    try:
+        sources.check_resolved([audio_url], "yt-dlp", allow_private)
+    except sources.SourceError as exc:  # not "YouTube refused": the plugin did
+        raise FindError(str(exc)) from exc
     return _asr_media(audio_url, sources.NET_WHITELIST, language)
 
 
-def transcript_for(url: str, kind: str, language: Optional[str]) -> tuple[sources.Source, list[vtt.Cue], str]:
+def transcript_for(url: str, kind: str, language: Optional[str],
+                   allow_private: bool = False) -> tuple[sources.Source, list[vtt.Cue], str]:
     """Returns (source, cues, how) where how is 'captions' / 'speech recognition'."""
     with tempfile.TemporaryDirectory(prefix="wakeme-find-") as td:
         work = Path(td)
@@ -188,14 +195,14 @@ def transcript_for(url: str, kind: str, language: Optional[str]) -> tuple[source
                 return src, caps, "captions"
             why = info.get("_caption_error")
             try:
-                return src, _youtube_audio_asr(url, info, work, language), (
+                return src, _youtube_audio_asr(url, info, work, language, allow_private), (
                     f"speech recognition (YouTube refused captions: {why})" if why else "speech recognition (no captions)")
             except sources.SourceError as exc:
                 raise FindError(f"YouTube refused: {exc}") from exc
         if kind == "twitch":
             raise FindError("Search works on YouTube videos, web media links, local files and demo://. "
                             "For Twitch, watch it live instead.")
-        src = sources.resolve(url, kind)
+        src = sources.resolve(url, kind, allow_private)
         if src.is_live and kind not in {"demo"}:
             raise FindError("That's a live stream. Use /wakeme <url> when <condition> to watch it.")
         if kind == "demo":
@@ -251,7 +258,7 @@ def find(url: str, question: str, *, surface: str, allow_private: bool, allowed_
          language: Optional[str], rerank: Optional[Callable]) -> str:
     try:
         kind = sources.check_url(url, surface=surface, allow_private=allow_private, allowed_dirs=allowed_dirs)
-        src, caps, how = transcript_for(url, kind, language)
+        src, caps, how = transcript_for(url, kind, language, allow_private)
     except (sources.SourceError, FindError) as exc:
         return f"🔎 Couldn't search that: {exc}"
     segments = [(c.start, c.text) for c in caps]

@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .sources import Source
+from .sources import Source, tool_env
 
 log = logging.getLogger(__name__)
 
@@ -131,18 +131,19 @@ class Ingest:
         self.eof.clear()
         argv = build_ffmpeg_argv(need("ffmpeg"), self.src, self.workdir, self.frames)
         err = open(self.workdir / "ffmpeg.log", "ab")
+        env = tool_env()
         if self.src.pipe_argv:
             # A new process group in OUR session: setpgid() into a group of another session is EPERM,
             # so start_new_session here would stop ffmpeg from joining streamlink's group.
             self.pipe = subprocess.Popen(self.src.pipe_argv, stdout=subprocess.PIPE, stderr=err,
-                                         stdin=subprocess.DEVNULL, process_group=0)
+                                         stdin=subprocess.DEVNULL, process_group=0, env=env)
             self.pgid = self.pipe.pid
             self.proc = subprocess.Popen(argv, stdin=self.pipe.stdout, stdout=subprocess.PIPE, stderr=err,
-                                         process_group=self.pgid)
+                                         process_group=self.pgid, env=env)
             self.pipe.stdout.close()  # ffmpeg owns the read end now
         else:
             self.proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=err,
-                                         start_new_session=True)
+                                         start_new_session=True, env=env)
             self.pgid = self.proc.pid
         err.close()
         with _LIVE_LOCK:

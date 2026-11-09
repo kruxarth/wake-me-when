@@ -11,7 +11,7 @@ live in the development workspace, not in this repository.
 ## Unit and integration tests
 
 ```bash
-python -m pytest -q tests          # 93 passed (~1.5 min; the e2e tests run real ffmpeg on demo://)
+python -m pytest -q tests          # 107 passed (~1.5 min; the e2e tests run real ffmpeg on demo://)
 hermes plugins doctor . --ci       # OK: 7 tools, 1 hook
 hermes plugins validate . --install-deps   # Validation passed; security scan: safe
 ```
@@ -22,7 +22,9 @@ evidence, confirm-twice, not-it suppression, Stage-A-only fallback), row-id → 
 quote fallback, transcript windowing and overlap trimming, VTT/SRT/YouTube rolling captions, the audio
 ring and bounded ASR queue, clip cutting after the ring rotated past the moment, URL safety (`--`
 before URLs for yt-dlp/streamlink, per-source ffmpeg `-protocol_whitelist`, no file+network mixing,
-local paths refused from messaging chats, symlink escape, private addresses), an end-to-end
+local paths refused from messaging chats, symlink escape, private addresses, the private-address check
+on stream URLs yt-dlp and streamlink resolve, exact YouTube/Twitch host matching), the minimal tool
+environment (every `subprocess` call passes `env=tool_env()`; fake tools show planted keys never arrive), an end-to-end
 `demo://keynote?speed=4` watch with a stubbed LLM (alert, clip, catch-up, hook context, auto-attach
 request, stop, no ffmpeg left), not-it feedback reaching the judge, LLM outage → unconfirmed alerts,
 plan failure, `max_watches` across processes, orphan marking, the Twitch-style pipe process group, and

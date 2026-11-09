@@ -205,7 +205,7 @@ class Watch:
         try:
             sources.check_url(self.req.url, surface=self.session.get("platform", ""),
                               allow_private=self.s.allow_private_network, allowed_dirs=self.s.allowed_media_dirs)
-            self.src = sources.resolve(self.req.url, self.kind)
+            self.src = sources.resolve(self.req.url, self.kind, self.s.allow_private_network)
         except sources.SourceError as exc:
             return "ended", f"source: {exc}", f"❌ Watch #{self.id} couldn't open the stream: {exc}"
         self.store.update_watch(self.id, title=self.src.title)
@@ -335,7 +335,8 @@ class Watch:
         if self.stop_event.wait(delay):
             return None
         try:
-            fresh = sources.resolve(self.req.url, self.kind)   # stream URLs expire; re-resolve
+            # stream URLs expire; re-resolve (and re-check them)
+            fresh = sources.resolve(self.req.url, self.kind, self.s.allow_private_network)
             self.src.inputs, self.src.pipe_argv = fresh.inputs, fresh.pipe_argv
         except sources.SourceError as exc:
             return "ended", "stream ended", f"🏁 Watch #{self.id}: the stream ended ({exc})."

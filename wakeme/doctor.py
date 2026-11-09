@@ -17,7 +17,8 @@ OK, WARN, FAIL = "✓", "!", "✗"
 
 def _version(argv: list[str]) -> str:
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL,
+                           env=sources.tool_env())
         return (p.stdout or p.stderr).strip().splitlines()[0][:60]
     except (OSError, subprocess.TimeoutExpired, IndexError):
         return ""
@@ -61,7 +62,8 @@ def _demo_pcm(seconds: float, offset: float) -> bytes:
         return b""
     p = subprocess.run([ffmpeg, "-v", "error", "-nostdin", "-protocol_whitelist", "file", "-ss", str(offset),
                         "-t", str(seconds), "-i", str(sources.DEMO_DIR / "keynote.mp4"), "-ac", "1", "-ar", "16000",
-                        "-f", "s16le", "pipe:1"], capture_output=True, timeout=30)
+                        "-f", "s16le", "pipe:1"], capture_output=True, timeout=30, stdin=subprocess.DEVNULL,
+                       env=sources.tool_env())
     return p.stdout
 
 

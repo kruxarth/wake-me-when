@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from .sources import which
+from .sources import tool_env, which
 
 VISION_SCHEMA = {
     "type": "object",
@@ -47,7 +47,7 @@ def ocr(path: Path, timeout: float = 15) -> str:
         return ""
     try:
         p = subprocess.run([exe, str(path), "stdout", "--psm", "11"], capture_output=True, text=True,
-                           timeout=timeout, stdin=subprocess.DEVNULL)
+                           timeout=timeout, stdin=subprocess.DEVNULL, env=tool_env())
     except subprocess.TimeoutExpired:
         return ""
     return " ".join(p.stdout.split()) if p.returncode == 0 else ""
